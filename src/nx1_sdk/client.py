@@ -93,15 +93,15 @@ class NX1Client:
         api_key: Optional[str] = None,
         host: Optional[str] = None,
         profile: Optional[str] = None,
-        verify_ssl: bool = True,
-        timeout: int = 30,
+        verify_ssl: Optional[bool] = None,
+        timeout: Optional[int] = None,
         logger: Optional[logging.Logger] = None
     ):
         """
         Initialize the NX1 client.
         
         Configuration is resolved in this priority order:
-        1. Explicit parameters (api_key, host)
+        1. Explicit parameters (api_key, host, verify_ssl, timeout)
         2. Environment variables (NX1_API_KEY, NX1_HOST)
         3. Profile configuration (~/.nx1/profiles)
         
@@ -123,8 +123,8 @@ class NX1Client:
             api_key=api_key,
             host=host,
             profile=profile,
-            verify_ssl=verify_ssl if api_key or host else None,  # Only override if explicit
-            timeout=timeout if api_key or host else None
+            verify_ssl=verify_ssl,
+            timeout=timeout
         )
         
         self.api_key = config["api_key"]
