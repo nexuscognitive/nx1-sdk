@@ -6,6 +6,9 @@ Usage:
     
     client = NX1Client(api_key="your-key", host="https://api.example.com")
     client.health.ping()
+    
+    # Or use profiles (~/.nx1/profiles)
+    client = NX1Client(profile="dev")
 """
 
 from nx1_sdk.client import NX1Client, create_client
@@ -27,6 +30,14 @@ from nx1_sdk.exceptions import (
     NX1TimeoutError,
 )
 from nx1_sdk.constants import FILE_FORMAT_OPTIONS, FILE_EXTENSION_MAP, CONTENT_TYPES
+from nx1_sdk.profiles import (
+    load_profiles,
+    get_profile,
+    list_profiles,
+    save_profile,
+    delete_profile,
+    resolve_config,
+)
 
 __version__ = "1.0.0"
 __author__ = "NX1 Team"
@@ -56,6 +67,13 @@ __all__ = [
     "FILE_FORMAT_OPTIONS",
     "FILE_EXTENSION_MAP",
     "CONTENT_TYPES",
+    # Profiles
+    "load_profiles",
+    "get_profile",
+    "list_profiles",
+    "save_profile",
+    "delete_profile",
+    "resolve_config",
     # Metadata
     "__version__",
 ]

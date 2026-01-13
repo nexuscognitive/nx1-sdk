@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from nx1_sdk.base import BaseClient
 from nx1_sdk.exceptions import NX1ValidationError
+from nx1_sdk.profiles import resolve_config
 from nx1_sdk.services import (
     AppsClient,
     CrewsClient,
@@ -32,22 +33,28 @@ class NX1Client:
     
     A comprehensive client for interacting with all NX1 API endpoints.
     
+    Configuration priority (highest to lowest):
+    1. Explicit parameters (api_key, host)
+    2. Environment variables (NX1_API_KEY, NX1_HOST)
+    3. Profile configuration (~/.nx1/profiles)
+    
     Usage:
         from nx1_sdk import NX1Client, IngestMode, ColumnTransformation, SparkDataType
         
+        # Using explicit credentials
         client = NX1Client(
             api_key="your-psk-key",
             host="https://aiapi.example.nx1cloud.com"
         )
         
+        # Using environment variables
+        client = NX1Client()
+        
+        # Using a named profile
+        client = NX1Client(profile="dev")
+        
         # Health check
         health = client.health.ping()
-        
-        # Ask a question
-        response = client.queries.ask(
-            domain="Sales Data",
-            prompt="Show me top 10 customers"
-        )
         
         # Ingest local file (complete pipeline)
         job_id = client.ingestion.ingest_local_file(
@@ -85,6 +92,7 @@ class NX1Client:
         self,
         api_key: Optional[str] = None,
         host: Optional[str] = None,
+        profile: Optional[str] = None,
         verify_ssl: bool = True,
         timeout: int = 30,
         logger: Optional[logging.Logger] = None
@@ -92,45 +100,55 @@ class NX1Client:
         """
         Initialize the NX1 client.
         
+        Configuration is resolved in this priority order:
+        1. Explicit parameters (api_key, host)
+        2. Environment variables (NX1_API_KEY, NX1_HOST)
+        3. Profile configuration (~/.nx1/profiles)
+        
         Args:
-            api_key: API key (PSK) for authentication. 
-                     Falls back to NX1_API_KEY or LAKEHOUSE_API_KEY env vars.
-            host: API host URL. 
-                  Falls back to NX1_HOST or LAKEHOUSE_HOST env vars.
+            api_key: API key (PSK) for authentication.
+            host: API host URL.
+            profile: Profile name to load from ~/.nx1/profiles.
+                     If not specified and no explicit credentials provided,
+                     will try to use 'default' profile if it exists.
             verify_ssl: Whether to verify SSL certificates. Default True.
             timeout: Request timeout in seconds. Default 30.
             logger: Custom logger instance.
         
         Raises:
-            NX1ValidationError: If api_key or host is not provided and not in env vars.
+            NX1ValidationError: If api_key or host cannot be resolved.
         """
-        self.api_key = (
-            api_key 
-            or os.environ.get('NX1_API_KEY') 
-            or os.environ.get('LAKEHOUSE_API_KEY')
+        # Resolve configuration from args, env vars, and profiles
+        config = resolve_config(
+            api_key=api_key,
+            host=host,
+            profile=profile,
+            verify_ssl=verify_ssl if api_key or host else None,  # Only override if explicit
+            timeout=timeout if api_key or host else None
         )
-        self.host = (
-            host 
-            or os.environ.get('NX1_HOST') 
-            or os.environ.get('LAKEHOUSE_HOST')
-        )
+        
+        self.api_key = config["api_key"]
+        self.host = config["host"]
+        self.profile = profile
         
         if not self.api_key:
             raise NX1ValidationError(
-                "API key required. Set NX1_API_KEY environment variable or pass api_key parameter."
+                "API key required. Provide via: api_key parameter, NX1_API_KEY env var, "
+                "or profile in ~/.nx1/profiles"
             )
         
         if not self.host:
             raise NX1ValidationError(
-                "Host URL required. Set NX1_HOST environment variable or pass host parameter."
+                "Host URL required. Provide via: host parameter, NX1_HOST env var, "
+                "or profile in ~/.nx1/profiles"
             )
         
         # Initialize base HTTP client
         self._client = BaseClient(
             api_key=self.api_key,
             host=self.host,
-            verify_ssl=verify_ssl,
-            timeout=timeout,
+            verify_ssl=config["verify_ssl"],
+            timeout=config["timeout"],
             logger=logger
         )
         
@@ -168,20 +186,21 @@ class NX1Client:
 def create_client(
     api_key: Optional[str] = None,
     host: Optional[str] = None,
+    profile: Optional[str] = None,
     **kwargs
 ) -> NX1Client:
     """
     Create an NX1 client instance.
     
     This is a convenience function that creates an NX1Client instance.
-    Environment variables NX1_API_KEY and NX1_HOST are used if not provided.
     
     Args:
         api_key: API key (PSK) for authentication.
         host: API host URL.
+        profile: Profile name to load from ~/.nx1/profiles.
         **kwargs: Additional arguments passed to NX1Client.
     
     Returns:
         NX1Client instance.
     """
-    return NX1Client(api_key=api_key, host=host, **kwargs)
+    return NX1Client(api_key=api_key, host=host, profile=profile, **kwargs)

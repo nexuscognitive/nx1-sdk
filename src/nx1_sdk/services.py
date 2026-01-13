@@ -500,6 +500,8 @@ class DataIngestionClient:
         mode: Union[str, IngestMode] = IngestMode.OVERWRITE,
         merge_keys: Optional[List[str]] = None,
         column_transformations: Optional[List[Dict[str, Any]]] = None,
+        # Job options
+        job_name: Optional[str] = None,
         # File options
         header: str = "true",
         infer_schema: str = "true",
@@ -533,6 +535,7 @@ class DataIngestionClient:
             mode: Write mode (append, overwrite, merge)
             merge_keys: Keys for merge mode
             column_transformations: List of transformations (cast, rename, encrypt)
+            job_name: Optional custom job name. If not provided, generates one.
             header: CSV has header row
             infer_schema: Auto-infer schema
             delimiter: CSV delimiter
@@ -592,10 +595,11 @@ class DataIngestionClient:
         
         # Step 2: Submit ingestion job
         log("\n2. Submitting ingestion job...")
-        job_name = f"ingestion_{table}_{int(time.time())}"
+        # Use custom job name if provided, otherwise generate one
+        actual_job_name = job_name if job_name else f"ingestion_{table}_{int(time.time())}"
         
         ingestion_response = self.submit(
-            name=job_name,
+            name=actual_job_name,
             ingesttype=IngestType.FILE,
             schema_name=schema_name,
             table=table,

@@ -7,9 +7,10 @@ A comprehensive Python SDK for the NX1 NLP Agent API.
 - **Complete API Coverage**: All 17+ API endpoints including metastore, queries, ingestion, data quality, jobs, apps, and more
 - **File Ingestion Pipeline**: Combined upload + ingest workflow with a single method call
 - **Column Transformations**: Cast, rename, and encrypt columns during ingestion
+- **Profile Management**: Store multiple API configurations in `~/.nx1/profiles`
 - **Type Safety**: Full type hints and enums for better IDE support
 - **CLI Tool**: Command-line interface for all operations
-- **Async-Ready Architecture**: Built for easy async extension
+- **Multiple Output Formats**: JSON, YAML, and table output
 
 ## Installation
 
@@ -32,11 +33,17 @@ pip install -e .
 ```python
 from nx1_sdk import NX1Client, IngestMode, ColumnTransformation, SparkDataType
 
-# Initialize client
+# Initialize client (uses env vars or default profile)
+client = NX1Client()
+
+# Or with explicit credentials
 client = NX1Client(
     api_key="your-psk-key",
     host="https://aiapi.example.nx1cloud.com"
 )
+
+# Or with a named profile
+client = NX1Client(profile="dev")
 
 # Health check
 health = client.health.ping()
@@ -53,6 +60,7 @@ job_id = client.ingestion.ingest_local_file(
     file_path="/path/to/data.csv",
     table="customers",
     schema_name="staging",
+    job_name="my_custom_job",  # Optional - auto-generated if not provided
     mode=IngestMode.OVERWRITE,
     column_transformations=[
         ColumnTransformation.cast("created_at", SparkDataType.TIMESTAMP),
@@ -62,6 +70,14 @@ job_id = client.ingestion.ingest_local_file(
 )
 ```
 
+### Configuration Priority
+
+The SDK resolves configuration in this order (highest priority first):
+
+1. **Explicit parameters** (`api_key`, `host`)
+2. **Environment variables** (`NX1_API_KEY`, `NX1_HOST`)
+3. **Profile** (`~/.nx1/profiles`)
+
 ### Environment Variables
 
 ```bash
@@ -69,12 +85,58 @@ export NX1_API_KEY="your-psk-key"
 export NX1_HOST="https://aiapi.example.nx1cloud.com"
 ```
 
-Then simply:
+### Profiles
+
+Store multiple API configurations in `~/.nx1/profiles` (YAML format):
+
+```yaml
+# ~/.nx1/profiles
+default:
+  host: https://api.production.nx1cloud.com
+  api_key: psk_prod_xxxxx
+  verify_ssl: true
+  timeout: 30
+
+dev:
+  host: https://api.dev.nx1cloud.com
+  api_key: psk_dev_xxxxx
+  verify_ssl: false
+
+staging:
+  host: https://api.staging.nx1cloud.com
+  api_key: psk_staging_xxxxx
+```
+
+Use profiles in code:
 
 ```python
-from nx1_sdk import NX1Client
+# Use default profile
+client = NX1Client()
 
-client = NX1Client()  # Reads from environment variables
+# Use named profile
+client = NX1Client(profile="dev")
+
+# Explicit credentials override profile
+client = NX1Client(profile="dev", api_key="override_key")
+```
+
+Manage profiles via CLI:
+
+```bash
+# List profiles
+nx1 profile list
+
+# Add/update a profile
+nx1 profile add --name dev --host https://api.dev.example.com --api-key psk_xxx
+
+# Remove a profile
+nx1 profile remove dev
+
+# Show profile details
+nx1 profile show dev
+
+# Show profiles file path
+nx1 profile path
 ```
 
 ### CLI Usage
@@ -83,18 +145,25 @@ client = NX1Client()  # Reads from environment variables
 # Health check
 nx1 ping
 
-# List domains
+# List domains (with different output formats)
 nx1 domains
+nx1 domains -o yaml
+nx1 domains -o table
 
 # Ask a question
 nx1 ask --domain "Sales Data" --prompt "Show top 10 customers"
 
+# Use a specific profile
+nx1 --profile dev domains
+nx1 -p staging jobs list
+
 # Ingest a local file with transformations
 nx1 ingest-file --file data.csv --table customers --schema staging \
+    --name my_ingestion_job \
     --cast "date_col:date" --rename "old_name:new_name" --encrypt ssn
 
 # List jobs
-nx1 jobs list
+nx1 jobs list -o table
 
 # App management
 nx1 apps list

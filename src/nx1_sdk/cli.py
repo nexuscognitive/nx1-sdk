@@ -4,10 +4,81 @@ import argparse
 import json
 import logging
 import sys
+from typing import Any, Dict, List, Union
+
+import yaml
+from tabulate import tabulate
 
 from nx1_sdk.client import NX1Client
 from nx1_sdk.exceptions import NX1APIError, NX1TimeoutError, NX1ValidationError
 from nx1_sdk.transformations import ColumnTransformation
+from nx1_sdk.profiles import (
+    list_profiles,
+    save_profile,
+    delete_profile,
+    get_profile_path,
+)
+
+
+def format_output(data: Any, output_format: str = "json") -> str:
+    """
+    Format output data in the specified format.
+    
+    Args:
+        data: Data to format (dict, list, or primitive)
+        output_format: One of 'json', 'yaml', or 'table'
+    
+    Returns:
+        Formatted string
+    """
+    if output_format == "yaml":
+        return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    
+    elif output_format == "table":
+        return format_as_table(data)
+    
+    else:  # json (default)
+        return json.dumps(data, indent=2, default=str)
+
+
+def format_as_table(data: Any) -> str:
+    """
+    Format data as a table.
+    
+    Args:
+        data: Data to format
+    
+    Returns:
+        Table-formatted string
+    """
+    if isinstance(data, list):
+        if not data:
+            return "No data"
+        
+        if isinstance(data[0], dict):
+            # List of dicts - use keys as headers
+            headers = list(data[0].keys())
+            rows = [[_truncate(row.get(h, "")) for h in headers] for row in data]
+            return tabulate(rows, headers=headers, tablefmt="simple")
+        else:
+            # List of primitives
+            return tabulate([[item] for item in data], tablefmt="simple")
+    
+    elif isinstance(data, dict):
+        # Single dict - show as key-value pairs
+        rows = [[k, _truncate(v)] for k, v in data.items()]
+        return tabulate(rows, headers=["Key", "Value"], tablefmt="simple")
+    
+    else:
+        return str(data)
+
+
+def _truncate(value: Any, max_length: int = 80) -> str:
+    """Truncate long values for table display."""
+    str_val = str(value) if value is not None else ""
+    if len(str_val) > max_length:
+        return str_val[:max_length - 3] + "..."
+    return str_val
 
 
 def main():
@@ -19,12 +90,30 @@ def main():
 Examples:
   nx1 ping
   nx1 domains
+  nx1 domains -o table
+  nx1 domains -o yaml
   nx1 ask --domain "Sales Data" --prompt "Show top 10 customers"
   nx1 ingest-file --file data.csv --table customers --schema staging
-  nx1 ingest-file --file data.csv --table employees --schema hr --cast "hire_date:date" --encrypt ssn
-  nx1 jobs list
-  nx1 apps list
-  nx1 apps create --name my-app
+  nx1 ingest-file --file data.csv --table employees --schema hr --name my_job --cast "hire_date:date" --encrypt ssn
+  nx1 jobs list -o table
+  nx1 apps list -o yaml
+  
+  # Using profiles
+  nx1 --profile dev domains
+  nx1 --profile staging jobs list
+  nx1 profile list
+  nx1 profile add --name dev --host https://api.dev.example.com --api-key psk_xxx
+  nx1 profile remove dev
+
+Output Formats:
+  -o json    JSON output (default)
+  -o yaml    YAML output
+  -o table   Table output
+
+Configuration Priority:
+  1. CLI arguments (--api-key, --host)
+  2. Environment variables (NX1_API_KEY, NX1_HOST)
+  3. Profile (~/.nx1/profiles)
 
 Environment Variables:
   NX1_API_KEY    API key for authentication
@@ -35,9 +124,16 @@ Environment Variables:
     # Global arguments
     parser.add_argument("--api-key", help="API key (or set NX1_API_KEY env var)")
     parser.add_argument("--host", help="API host (or set NX1_HOST env var)")
+    parser.add_argument("--profile", "-p", help="Profile name from ~/.nx1/profiles")
     parser.add_argument("--no-verify-ssl", action="store_true", help="Disable SSL verification")
     parser.add_argument("--timeout", type=int, default=30, help="Request timeout in seconds")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument(
+        "-o", "--output",
+        choices=["json", "yaml", "table"],
+        default="json",
+        help="Output format (default: json)"
+    )
     
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
@@ -76,6 +172,7 @@ Environment Variables:
     ingest_file_p.add_argument("--file", required=True, dest="file_path")
     ingest_file_p.add_argument("--table", required=True)
     ingest_file_p.add_argument("--schema", required=True, dest="schema_name")
+    ingest_file_p.add_argument("--name", dest="job_name", help="Custom job name (auto-generated if not specified)")
     ingest_file_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
     ingest_file_p.add_argument("--merge-keys", help="Comma-separated merge keys")
     ingest_file_p.add_argument("--delimiter", default=",")
@@ -235,6 +332,22 @@ Environment Variables:
     crews_st = crews_sub.add_parser("status")
     crews_st.add_argument("task_id")
     
+    # Profile management commands
+    profile_p = subparsers.add_parser("profile", help="Manage profiles (~/.nx1/profiles)")
+    profile_sub = profile_p.add_subparsers(dest="profile_command")
+    profile_sub.add_parser("list", help="List all profiles")
+    profile_sub.add_parser("path", help="Show profiles file path")
+    profile_add = profile_sub.add_parser("add", help="Add/update a profile")
+    profile_add.add_argument("--name", required=True, help="Profile name")
+    profile_add.add_argument("--host", required=True, help="API host URL")
+    profile_add.add_argument("--api-key", required=True, help="API key (PSK)")
+    profile_add.add_argument("--no-verify-ssl", action="store_true", help="Disable SSL verification")
+    profile_add.add_argument("--timeout", type=int, default=30, help="Request timeout")
+    profile_rm = profile_sub.add_parser("remove", help="Remove a profile")
+    profile_rm.add_argument("name", help="Profile name to remove")
+    profile_show = profile_sub.add_parser("show", help="Show a profile (hides API key)")
+    profile_show.add_argument("name", help="Profile name to show")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -247,9 +360,58 @@ Environment Variables:
         logging.basicConfig(level=logging.INFO, format='%(message)s')
     
     try:
+        # Handle profile management commands first (don't need client)
+        if args.command == "profile":
+            cmd = args.profile_command
+            if cmd == "list" or not cmd:
+                profiles = list_profiles()
+                if not profiles:
+                    print(f"No profiles found. Create one with: nx1 profile add --name <name> --host <url> --api-key <key>")
+                    print(f"Profiles file: {get_profile_path()}")
+                    return
+                # Hide API keys in output
+                safe_profiles = {}
+                for name, config in profiles.items():
+                    safe_config = dict(config)
+                    if "api_key" in safe_config:
+                        key = safe_config["api_key"]
+                        safe_config["api_key"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+                    safe_profiles[name] = safe_config
+                print(format_output(safe_profiles, args.output))
+                return
+            elif cmd == "path":
+                print(get_profile_path())
+                return
+            elif cmd == "add":
+                save_profile(
+                    profile_name=args.name,
+                    host=args.host,
+                    api_key=args.api_key,
+                    verify_ssl=not args.no_verify_ssl,
+                    timeout=args.timeout
+                )
+                print(f"✅ Profile '{args.name}' saved to {get_profile_path()}")
+                return
+            elif cmd == "remove":
+                if delete_profile(args.name):
+                    print(f"✅ Profile '{args.name}' removed")
+                else:
+                    print(f"❌ Profile '{args.name}' not found")
+                return
+            elif cmd == "show":
+                from nx1_sdk.profiles import get_profile
+                profile_config = get_profile(args.name)
+                safe_config = dict(profile_config)
+                if "api_key" in safe_config:
+                    key = safe_config["api_key"]
+                    safe_config["api_key"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+                print(format_output(safe_config, args.output))
+                return
+        
         client = NX1Client(
             api_key=args.api_key,
             host=args.host,
+            profile=args.profile,
             verify_ssl=not args.no_verify_ssl,
             timeout=args.timeout
         )
@@ -301,6 +463,7 @@ Environment Variables:
                 file_path=args.file_path, table=args.table, schema_name=args.schema_name,
                 mode=args.mode, merge_keys=merge_keys,
                 column_transformations=transformations if transformations else None,
+                job_name=args.job_name,
                 header=args.header, delimiter=args.delimiter, domain=args.domain, tags=tags,
                 wait_for_completion=not args.no_wait, max_wait=args.max_wait, verbose=True
             )
@@ -444,7 +607,7 @@ Environment Variables:
                 result = client.crews.get_crew_status(args.task_id)
         
         if result is not None:
-            print(json.dumps(result, indent=2, default=str))
+            print(format_output(result, args.output))
     
     except NX1ValidationError as e:
         print(f"❌ Validation Error: {e}", file=sys.stderr); sys.exit(1)
