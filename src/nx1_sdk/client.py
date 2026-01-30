@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from nx1_sdk.base import BaseClient
 from nx1_sdk.exceptions import NX1ValidationError
 from nx1_sdk.profiles import resolve_config
-from nx1_sdk.services import (
+from nx1_sdk.services.nx1_service import (
     AppsClient,
     CrewsClient,
     DataConsumerClient,
