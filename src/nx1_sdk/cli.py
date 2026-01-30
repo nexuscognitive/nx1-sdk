@@ -5,11 +5,15 @@ import json
 import logging
 import sys
 from typing import Any, Dict, List, Optional
+import os
+import getpass
 
 import yaml
 from tabulate import tabulate
 
 from nx1_sdk.client import NX1Client
+from nx1_sdk.services.airflow_trigger_service import AirflowTriggererClient
+from nx1_sdk.services.kyuubi_service import KyuubiBatchSubmitterClient
 from nx1_sdk.exceptions import NX1APIError, NX1TimeoutError, NX1ValidationError
 from nx1_sdk.transformations import ColumnTransformation
 from nx1_sdk.profiles import (
@@ -19,6 +23,54 @@ from nx1_sdk.profiles import (
     get_profile_path,
 )
 
+def load_yaml_config(config_file):
+    """Load configuration from YAML file."""
+    with open(config_file, "r") as f:
+        return yaml.safe_load(f)
+
+def get_password(args, username, env_var, logger_name=None):
+    """Get password from args, env var, or prompt."""
+    password = getattr(args, "password", None)
+
+    if not password:
+        password = os.environ.get(env_var)
+        if password and logger_name:
+            logging.getLogger(logger_name).debug(
+                f"Using password from {env_var} environment variable"
+            )
+
+    if not password:
+        password = getpass.getpass(f"Password for {username}: ")
+
+    return password
+
+def resolve_config(args):
+    """
+    Load YAML config and merge into args.
+    Priority: CLI > YAML
+    Mutates args in-place.
+    """
+    yaml_config = None
+    if getattr(args, "config_file", None):
+        yaml_config = load_yaml_config(args.config_file)
+
+    if not yaml_config:
+        return args
+
+    for key, value in yaml_config.items():
+        # If CLI did NOT provide this value, take from YAML
+        if not hasattr(args, key) or getattr(args, key) is None:
+            setattr(args, key, value)
+
+def validate_required(args, required_fields):
+    missing = [
+        field for field in required_fields
+        if getattr(args, field, None) is None
+    ]
+    if missing:
+        raise ValueError(
+            f"Missing required arguments: {', '.join(missing)}"
+        )
 
 def format_output(data: Any, output_format: str = "json") -> str:
     """Format output data in the specified format."""
@@ -63,6 +115,7 @@ def add_global_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", help="API host")
     parser.add_argument("--profile", "-p", help="Profile name from ~/.nx1/profiles")
     parser.add_argument("--no-verify-ssl", action="store_true", help="Disable SSL verification")
+    parser.add_argument("--config-file", help="YAML config file")
     parser.add_argument("--timeout", type=int, default=None, help="Request timeout (default: 30)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("-o", "--output", choices=["json", "yaml", "table"], default="json", help="Output format")
@@ -95,6 +148,7 @@ Global options (can appear anywhere):
   --profile, -p NAME  Profile from ~/.nx1/profiles
   --timeout SECS      Request timeout (default: 30)
   --no-verify-ssl     Disable SSL verification
+  --config-file       YAML config file
   -o, --output FMT    Output: json, yaml, table (default: json)
   -v, --verbose       Verbose output
 
@@ -125,34 +179,34 @@ Configuration Priority:
     subparsers.add_parser("engines", parents=[parent_parser], help="List supported engines")
     
     schemas_p = subparsers.add_parser("schemas", parents=[parent_parser], help="List schemas")
-    schemas_p.add_argument("--catalog", required=True)
+    schemas_p.add_argument("--catalog")
     
     tables_p = subparsers.add_parser("tables", parents=[parent_parser], help="List tables")
-    tables_p.add_argument("--catalog", required=True)
-    tables_p.add_argument("--schema", required=True)
+    tables_p.add_argument("--catalog")
+    tables_p.add_argument("--schema")
     
     columns_p = subparsers.add_parser("columns", parents=[parent_parser], help="List columns")
-    columns_p.add_argument("--catalog", required=True)
-    columns_p.add_argument("--schema", required=True)
-    columns_p.add_argument("--table", required=True)
+    columns_p.add_argument("--catalog")
+    columns_p.add_argument("--schema")
+    columns_p.add_argument("--table")
     
     # -------------------------------------------------------------------------
     # Query commands
     # -------------------------------------------------------------------------
     ask_p = subparsers.add_parser("ask", parents=[parent_parser], help="Ask a question")
-    ask_p.add_argument("--domain", required=True)
-    ask_p.add_argument("--prompt", required=True)
+    ask_p.add_argument("--domain")
+    ask_p.add_argument("--prompt")
     
     suggest_p = subparsers.add_parser("suggest", parents=[parent_parser], help="Get suggestions")
-    suggest_p.add_argument("--domain", required=True)
+    suggest_p.add_argument("--domain")
     
     # -------------------------------------------------------------------------
     # File Ingestion
     # -------------------------------------------------------------------------
     ingest_file_p = subparsers.add_parser("ingest-file", parents=[parent_parser], help="Upload and ingest local file")
-    ingest_file_p.add_argument("--file", required=True, dest="file_path")
-    ingest_file_p.add_argument("--table", required=True)
-    ingest_file_p.add_argument("--schema", required=True, dest="schema_name")
+    ingest_file_p.add_argument("--file", dest="file_path")
+    ingest_file_p.add_argument("--table")
+    ingest_file_p.add_argument("--schema", dest="schema_name")
     ingest_file_p.add_argument("--name", dest="job_name", help="Custom job name")
     ingest_file_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
     ingest_file_p.add_argument("--merge-keys", help="Comma-separated merge keys")
@@ -168,9 +222,9 @@ Configuration Priority:
     
     # Direct Ingestion
     ingest_p = subparsers.add_parser("ingest", parents=[parent_parser], help="Submit ingestion from S3")
-    ingest_p.add_argument("--name", required=True)
-    ingest_p.add_argument("--table", required=True)
-    ingest_p.add_argument("--schema", required=True, dest="schema_name")
+    ingest_p.add_argument("--name")
+    ingest_p.add_argument("--table")
+    ingest_p.add_argument("--schema", dest="schema_name")
     ingest_p.add_argument("--type", dest="ingesttype", default="file", choices=["file", "jdbc", "lakehouse"])
     ingest_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
     ingest_p.add_argument("--file-path")
@@ -229,10 +283,10 @@ Configuration Priority:
     s3_get = s3_sub.add_parser("get", parents=[parent_parser])
     s3_get.add_argument("bucket_name")
     s3_create = s3_sub.add_parser("create", parents=[parent_parser])
-    s3_create.add_argument("--bucket", required=True)
-    s3_create.add_argument("--endpoint", required=True)
-    s3_create.add_argument("--access-key", required=True)
-    s3_create.add_argument("--secret-key", required=True)
+    s3_create.add_argument("--bucket")
+    s3_create.add_argument("--endpoint")
+    s3_create.add_argument("--access-key")
+    s3_create.add_argument("--secret-key")
     s3_del = s3_sub.add_parser("delete", parents=[parent_parser])
     s3_del.add_argument("bucket_name")
     
@@ -242,13 +296,13 @@ Configuration Priority:
     dq_p = subparsers.add_parser("dq", parents=[parent_parser], help="Data quality")
     dq_sub = dq_p.add_subparsers(dest="dq_command")
     dq_suggest = dq_sub.add_parser("suggest", parents=[parent_parser])
-    dq_suggest.add_argument("--table", required=True)
+    dq_suggest.add_argument("--table")
     dq_suggest.add_argument("--request")
     dq_rules = dq_sub.add_parser("rules", parents=[parent_parser])
-    dq_rules.add_argument("--table", required=True)
+    dq_rules.add_argument("--table")
     dq_rules.add_argument("--accepted-only", action="store_true")
     dq_run = dq_sub.add_parser("run", parents=[parent_parser])
-    dq_run.add_argument("--table", required=True)
+    dq_run.add_argument("--table")
     dq_acc = dq_sub.add_parser("accept", parents=[parent_parser])
     dq_acc.add_argument("dq_id")
     dq_del = dq_sub.add_parser("delete", parents=[parent_parser])
@@ -272,41 +326,41 @@ Configuration Priority:
     apps_sub = apps_p.add_subparsers(dest="apps_command")
     apps_sub.add_parser("list", parents=[parent_parser])
     apps_create = apps_sub.add_parser("create", parents=[parent_parser])
-    apps_create.add_argument("--name", required=True)
+    apps_create.add_argument("--name")
     apps_get = apps_sub.add_parser("get", parents=[parent_parser])
     apps_get.add_argument("app_id")
     apps_del = apps_sub.add_parser("delete", parents=[parent_parser])
     apps_del.add_argument("app_id")
     apps_vers = apps_sub.add_parser("versions", parents=[parent_parser])
-    apps_vers.add_argument("--app-id", required=True)
+    apps_vers.add_argument("--app-id")
     apps_cv = apps_sub.add_parser("create-version", parents=[parent_parser])
-    apps_cv.add_argument("--app-id", required=True)
-    apps_cv.add_argument("--name", required=True)
+    apps_cv.add_argument("--app-id")
+    apps_cv.add_argument("--name")
     apps_act = apps_sub.add_parser("activate", parents=[parent_parser])
     apps_act.add_argument("version_id")
     apps_roles = apps_sub.add_parser("roles", parents=[parent_parser])
-    apps_roles.add_argument("--app-id", required=True)
+    apps_roles.add_argument("--app-id")
     apps_cr = apps_sub.add_parser("create-role", parents=[parent_parser])
-    apps_cr.add_argument("--app-id", required=True)
-    apps_cr.add_argument("--name", required=True)
+    apps_cr.add_argument("--app-id")
+    apps_cr.add_argument("--name")
     apps_comp = apps_sub.add_parser("components", parents=[parent_parser])
-    apps_comp.add_argument("--version-id", required=True)
+    apps_comp.add_argument("--version-id")
     apps_dag = apps_sub.add_parser("add-dag", parents=[parent_parser])
-    apps_dag.add_argument("--version-id", required=True)
-    apps_dag.add_argument("--file", required=True)
+    apps_dag.add_argument("--version-id")
+    apps_dag.add_argument("--file")
     apps_dag.add_argument("--name")
     
     # -------------------------------------------------------------------------
     # Mirror commands
     # -------------------------------------------------------------------------
     mirror_p = subparsers.add_parser("mirror", parents=[parent_parser], help="Create mirroring job")
-    mirror_p.add_argument("--name", required=True)
-    mirror_p.add_argument("--source-catalog", required=True)
-    mirror_p.add_argument("--source-schema", required=True)
-    mirror_p.add_argument("--source-table", required=True)
-    mirror_p.add_argument("--target-catalog", required=True)
-    mirror_p.add_argument("--target-schema", required=True)
-    mirror_p.add_argument("--target-table", required=True)
+    mirror_p.add_argument("--name")
+    mirror_p.add_argument("--source-catalog")
+    mirror_p.add_argument("--source-schema")
+    mirror_p.add_argument("--source-table")
+    mirror_p.add_argument("--target-catalog")
+    mirror_p.add_argument("--target-schema")
+    mirror_p.add_argument("--target-table")
     mirror_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
     mirror_p.add_argument("--schedule")
     mirror_p.add_argument("--merge-keys")
@@ -339,9 +393,9 @@ Configuration Priority:
     profile_sub.add_parser("list", parents=[parent_parser], help="List all profiles")
     profile_sub.add_parser("path", parents=[parent_parser], help="Show profiles file path")
     profile_add = profile_sub.add_parser("add", help="Add/update a profile")
-    profile_add.add_argument("--name", required=True, help="Profile name")
-    profile_add.add_argument("--host", required=True, help="API host URL")
-    profile_add.add_argument("--api-key", required=True, help="API key (PSK)")
+    profile_add.add_argument("--name", help="Profile name")
+    profile_add.add_argument("--host", help="API host URL")
+    profile_add.add_argument("--api-key", help="API key (PSK)")
     profile_add.add_argument("--no-verify-ssl", action="store_true", help="Disable SSL verification")
     profile_add.add_argument("--timeout", type=int, default=30, help="Request timeout")
     profile_add.add_argument("-o", "--output", choices=["json", "yaml", "table"], default="json")
@@ -349,12 +403,44 @@ Configuration Priority:
     profile_rm.add_argument("name", help="Profile name to remove")
     profile_show = profile_sub.add_parser("show", parents=[parent_parser], help="Show a profile")
     profile_show.add_argument("name", help="Profile name to show")
+
+    # -------------------------------------------------------------------------
+    # Airflow Triggerer commands
+    # -------------------------------------------------------------------------
+    airflow_p = subparsers.add_parser("airflow", parents=[parent_parser], help="Trigger Airflow DAGs")
+    airflow_p.add_argument("--url", help="Airflow base URL")
+    airflow_p.add_argument("--dag", help="DAG ID")
+    airflow_p.add_argument("--username", help="Airflow username")
+    airflow_p.add_argument("--password", help="Airflow password")
+    airflow_p.add_argument("--conf", default="{}", help="DAG run config (JSON)")
+    airflow_p.add_argument("--debug", action="store_true", help="Enable debug logging")
+
+    # -------------------------------------------------------------------------
+    # PKyuubi commands
+    # -------------------------------------------------------------------------
+    kyuubi_p = subparsers.add_parser("kyuubi", parents=[parent_parser], help="Submit Kyuubi batch job")
+    kyuubi_p.add_argument("--server", help="Kyuubi server URL")
+    kyuubi_p.add_argument("--history-server", help="Spark history server URL")
+    kyuubi_p.add_argument("--username", help="Username")
+    kyuubi_p.add_argument("--password", help="Password")
+    kyuubi_p.add_argument("--resource", help="Jar / Py file")
+    kyuubi_p.add_argument("--classname", help="Main class")
+    kyuubi_p.add_argument("--name", help="Job name")
+    kyuubi_p.add_argument("--queue", help="YuniKorn queue")
+    kyuubi_p.add_argument("--args", help="Job arguments")
+    kyuubi_p.add_argument("--conf", help="Spark configs")
+    kyuubi_p.add_argument("--pyfiles", help="PyFiles")
+    kyuubi_p.add_argument("--jars", help="Jars")
+    kyuubi_p.add_argument("--files", help="Files")
+    kyuubi_p.add_argument("--show-logs", action="store_true")
+    kyuubi_p.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     # -------------------------------------------------------------------------
     # Parse arguments
     # -------------------------------------------------------------------------
     args = parser.parse_args()
-    
+    resolve_config(args)
+
     if not args.command:
         parser.print_help()
         return
@@ -371,16 +457,20 @@ Configuration Priority:
             _handle_profile_command(args)
             return
         
-        # Create client with resolved configuration
-        client = NX1Client(
-            api_key=args.api_key,
-            host=args.host,
-            profile=args.profile,
-            verify_ssl=False if args.no_verify_ssl else None,
-            timeout=args.timeout
-        )
-        
-        result = _execute_command(client, args)
+        # Create client with resolved configuration based on command
+        if args.command == "airflow":
+            result = _handle_airflow(args)
+        elif args.command == "kyuubi":
+            result = _handle_kyuubi(args)
+        else:
+            client = NX1Client(
+                api_key=args.api_key,
+                host=args.host,
+                profile=args.profile,
+                verify_ssl=False if args.no_verify_ssl else None,
+                timeout=args.timeout
+            )
+            result = _execute_command(client, args)
         
         if result is not None:
             print(format_output(result, args.output))
@@ -410,6 +500,7 @@ Configuration Priority:
 
 def _handle_profile_command(args) -> None:
     """Handle profile management commands."""
+    validate_required(args, ["name"])
     cmd = args.profile_command
     output_fmt = getattr(args, 'output', 'json')
     
@@ -474,10 +565,13 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     elif args.command == "catalogs":
         return client.metastore.get_catalogs()
     elif args.command == "schemas":
+        validate_required(args, ["catalog"])
         return client.metastore.get_schemas(args.catalog)
     elif args.command == "tables":
+        validate_required(args, ["catalog","schema"])
         return client.metastore.get_tables(args.catalog, args.schema)
     elif args.command == "columns":
+        validate_required(args, ["catalog","schema","table"])
         return client.metastore.get_columns(args.catalog, args.schema, args.table)
     elif args.command == "tags":
         return client.metastore.get_tags()
@@ -486,8 +580,10 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     
     # Query commands
     elif args.command == "ask":
+        validate_required(args, ["domain","prompt"])
         return client.queries.ask(args.domain, args.prompt)
     elif args.command == "suggest":
+        validate_required(args, ["domain"])
         return client.queries.suggest(args.domain)
     
     # Ingest local file
@@ -542,6 +638,7 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
 
 def _handle_ingest_file(client: NX1Client, args) -> None:
     """Handle ingest-file command."""
+    validate_required(args, ["file","table","schema"])
     transformations = []
     if args.cast:
         for c in args.cast:
@@ -581,6 +678,7 @@ def _handle_ingest_file(client: NX1Client, args) -> None:
 
 def _handle_ingest(client: NX1Client, args) -> None:
     """Handle ingest command."""
+    validate_required(args, ["name","table","schema"])
     file_opts = {"header": args.header, "inferSchema": "true", "delimiter": args.delimiter}
     merge_keys = args.merge_keys.split(",") if args.merge_keys else None
     tags = args.tags.split(",") if args.tags else None
@@ -608,6 +706,8 @@ def _handle_ingest(client: NX1Client, args) -> None:
 def _handle_jobs(client: NX1Client, args) -> Optional[Any]:
     """Handle jobs commands."""
     cmd = args.jobs_command
+    if cmd in ("get","delete","trigger","wait"):
+        validate_required(args, ["job_id"])
     if cmd == "list" or not cmd:
         return client.jobs.get_all()
     elif cmd == "get":
@@ -628,12 +728,16 @@ def _handle_jobs(client: NX1Client, args) -> Optional[Any]:
 def _handle_files(client: NX1Client, args) -> Optional[Any]:
     """Handle files commands."""
     cmd = args.files_command
+    if cmd in ("get","delete"):
+        validate_required(args, ["file_id"])
     if cmd == "list" or not cmd:
         return client.files.get_all()
     elif cmd == "upload":
+        validate_required(args, ["file_path","name"])
         result = client.files.upload(args.file_path, args.name)
         print(f"✅ Uploaded: {result.get('id')}, S3: {result.get('s3_url')}")
     elif cmd == "upload-url":
+        validate_required(args, ["url","name"])
         result = client.files.upload_from_url(args.url, args.name)
         print(f"✅ Uploaded: {result.get('id')}, S3: {result.get('s3_url')}")
     elif cmd == "get":
@@ -647,6 +751,8 @@ def _handle_files(client: NX1Client, args) -> Optional[Any]:
 def _handle_s3(client: NX1Client, args) -> Optional[Any]:
     """Handle s3 commands."""
     cmd = args.s3_command
+    if cmd in ("get","delete"):
+        validate_required(args, ["bucket_name"])
     if cmd == "list" or not cmd:
         return client.s3.get_buckets()
     elif cmd == "refresh":
@@ -655,6 +761,7 @@ def _handle_s3(client: NX1Client, args) -> Optional[Any]:
     elif cmd == "get":
         return client.s3.get_bucket(args.bucket_name)
     elif cmd == "create":
+        validate_required(args, ["bucket","endpoint","access_key","secret_key"])
         client.s3.create_bucket(args.bucket, args.endpoint, args.access_key, args.secret_key)
         print(f"✅ Created: {args.bucket}")
     elif cmd == "delete":
@@ -734,6 +841,7 @@ def _handle_apps(client: NX1Client, args) -> Optional[Any]:
 
 def _handle_mirror(client: NX1Client, args) -> Optional[Any]:
     """Handle mirror command."""
+    validate_required(args, ["name","source_catalog","source_schema","source_table","target_catalog","target_schema","target_table"])
     merge_keys = args.merge_keys.split(",") if args.merge_keys else None
     result = client.mirroring.create(
         job_name=args.name,
@@ -754,6 +862,8 @@ def _handle_mirror(client: NX1Client, args) -> Optional[Any]:
 def _handle_shares(client: NX1Client, args) -> Optional[Any]:
     """Handle shares commands."""
     cmd = args.shares_command
+    if cmd in ("get","delete"):
+        validate_required(args, ["share_id"])
     if cmd == "list" or not cmd:
         return client.data_shares.get_all()
     elif cmd == "get":
@@ -770,9 +880,74 @@ def _handle_crews(client: NX1Client, args) -> Optional[Any]:
     if cmd == "list" or not cmd:
         return client.crews.list_crews()
     elif cmd == "status":
+        validate_required(args, ["task_id"])
         return client.crews.get_crew_status(args.task_id)
     return None
 
+def _handle_airflow(args):
+    validate_required(args, ["url", "username", "dag"])
+
+    password = get_password(
+        args,
+        args.username,
+        env_var="AIRFLOW_TRIGGER_PASSWORD",
+    )
+
+    conf_dict = json.loads(getattr(args, "conf", "{}"))
+
+    client = AirflowTriggererClient(
+        airflow_url=args.url,
+        username=args.username,
+        password=password,
+    )
+
+    dag_run_id = client.trigger_dag(args.dag, conf_dict)
+    final_state = client.monitor_dag(args.dag, dag_run_id)
+
+    return {
+        "dag_run_id": dag_run_id,
+        "final_state": final_state,
+    }
+
+
+def _handle_kyuubi(args):
+    validate_required(args, ["server", "username", "resource", "name"])
+
+    inject_yunikorn_spark_configs(args)
+
+    password = get_password(
+        args,
+        args.username,
+        env_var="KYUUBI_SUBMIT_PASSWORD",
+    )
+
+    submitter = KyuubiBatchSubmitterClient(
+        server=args.server,
+        username=args.username,
+        password=password,
+        history_server=getattr(args, "history_server", None),
+    )
+
+    batch_id = submitter.submit_batch(
+        resource=args.resource,
+        classname=getattr(args, "classname", None),
+        name=args.name,
+        args=getattr(args, "args", None),
+        conf=getattr(args, "conf", None),
+        pyfiles=getattr(args, "pyfiles", None),
+        jars=getattr(args, "jars", None),
+        files=getattr(args, "files", None),
+    )
+
+    final_state = submitter.monitor_job(
+        batch_id,
+        show_logs=getattr(args, "show_logs", False),
+    )
+
+    return {
+        "batch_id": batch_id,
+        "final_state": final_state,
+    }
 
 if __name__ == "__main__":
     main()

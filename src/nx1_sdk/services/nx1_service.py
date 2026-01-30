@@ -676,6 +676,7 @@ class DataMirroringClient:
     ) -> Dict[str, Any]:
         """Create a data mirroring job."""
         payload = {
+            "job_type": "mirror",
             "job_name": job_name,
             "source_catalog": source_catalog,
             "source_schema": source_schema,
