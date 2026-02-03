@@ -638,7 +638,7 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
 
 def _handle_ingest_file(client: NX1Client, args) -> None:
     """Handle ingest-file command."""
-    validate_required(args, ["file","table","schema"])
+    validate_required(args, ["file_path", "table", "schema_name"])
     transformations = []
     if args.cast:
         for c in args.cast:
