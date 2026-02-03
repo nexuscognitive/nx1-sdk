@@ -642,15 +642,20 @@ def _handle_ingest_file(client: NX1Client, args) -> None:
     transformations = []
     if args.cast:
         for c in args.cast:
-            col, dtype = c.split(":", 1)
-            transformations.append(ColumnTransformation.cast(col, dtype))
+            for item in c.split(','):
+                col, dtype = item.strip().split(':', 1)
+                transformations.append(ColumnTransformation.cast(col.strip(), dtype.strip()))
+    
     if args.rename:
         for r in args.rename:
-            old, new = r.split(":", 1)
-            transformations.append(ColumnTransformation.rename(old, new))
+            for item in r.split(','):
+                old, new = item.strip().split(':', 1)
+                transformations.append(ColumnTransformation.rename(old.strip(), new.strip()))
+    
     if args.encrypt:
         for e in args.encrypt:
-            transformations.append(ColumnTransformation.encrypt(e))
+            for col in e.split(','):
+                transformations.append(ColumnTransformation.encrypt(col.strip()))
     
     merge_keys = args.merge_keys.split(",") if args.merge_keys else None
     tags = args.tags.split(",") if args.tags else None
