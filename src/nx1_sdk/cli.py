@@ -683,7 +683,7 @@ def _handle_ingest_file(client: NX1Client, args) -> None:
 
 def _handle_ingest(client: NX1Client, args) -> None:
     """Handle ingest command."""
-    validate_required(args, ["name","table","schema"])
+    validate_required(args, ["name","table","schema_name"])
     file_opts = {"header": args.header, "inferSchema": "true", "delimiter": args.delimiter}
     merge_keys = args.merge_keys.split(",") if args.merge_keys else None
     tags = args.tags.split(",") if args.tags else None
