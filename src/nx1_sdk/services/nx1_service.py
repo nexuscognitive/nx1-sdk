@@ -969,7 +969,7 @@ class AppsClient:
     
     def activate_version(self, version_id: str) -> Dict[str, Any]:
         """Activate an app version."""
-        return self._client.post("api", "app", "versions", version_id, "activate")
+        return self._client.put("api", "app", "versions", version_id, "activate")
     
     # App Component Operations
     def get_components(self, version_id: str) -> List[Dict[str, Any]]:

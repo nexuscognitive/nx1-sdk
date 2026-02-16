@@ -169,6 +169,11 @@ nx1 jobs list -o table
 nx1 apps list
 nx1 apps create --name my-app
 nx1 apps versions --app-id <uuid>
+
+# Full app deployment (create/find app, create version, upload components, activate)
+nx1 apps deploy --app-name my-app --version 1.0 \
+    --dags /path/to/dag1.py,/path/to/dag2.py \
+    --artifacts /path/to/artifact1.py,/path/to/artifact2.py
 ```
 
 ## API Reference
@@ -299,8 +304,63 @@ version_id = version["id"]
 # Add a DAG component
 client.apps.add_dag(version_id, "/path/to/my_dag.py")
 
+# Add an artifact component
+client.apps.add_component(version_id, "artifact", "/path/to/artifact.py")
+
 # Activate the version
 client.apps.activate_version(version_id)
+```
+
+### App Deployment Example
+
+Full deployment workflow — finds or creates the app, creates a new version, uploads DAGs and artifacts, and activates:
+
+```python
+import sys
+
+client = NX1Client()
+apps_manager = client.apps
+
+app_name = "my-data-app"
+version = "1.0"
+dags = "/path/to/dag1.py,/path/to/dag2.py"
+artifacts = "/path/to/artifact1.py,/path/to/artifact2.py"
+
+# Find or create the app
+apps = apps_manager.get_all()
+existing = [a for a in apps if a['app_name'] == app_name]
+if existing:
+    app_id = existing[0]['id']
+else:
+    app_id = apps_manager.create(app_name)['id']
+
+# Ensure the version doesn't already exist
+versions = apps_manager.get_versions(app_id)
+if version in [v['version_name'] for v in versions]:
+    print(f"Version {version} already exists")
+    sys.exit(1)
+
+# Create version
+version_id = apps_manager.create_version(app_id, version)['id']
+
+# Upload artifacts
+for path in artifacts.split(','):
+    apps_manager.add_component(version_id, "artifact", path.strip())
+
+# Upload DAGs
+for path in dags.split(','):
+    apps_manager.add_dag(version_id, path.strip())
+
+# Activate
+apps_manager.activate_version(version_id)
+```
+
+Or use the CLI shorthand:
+
+```bash
+nx1 apps deploy --app-name my-data-app --version 1.0 \
+    --dags /path/to/dag1.py,/path/to/dag2.py \
+    --artifacts /path/to/artifact1.py,/path/to/artifact2.py
 ```
 
 ## Error Handling

@@ -349,7 +349,12 @@ Configuration Priority:
     apps_dag.add_argument("--version-id")
     apps_dag.add_argument("--file")
     apps_dag.add_argument("--name")
-    
+    apps_deploy = apps_sub.add_parser("deploy", parents=[parent_parser], help="Full app deployment")
+    apps_deploy.add_argument("--app-name", required=True, help="App name")
+    apps_deploy.add_argument("--version", required=True, help="Version name")
+    apps_deploy.add_argument("--dags", help="Comma separated list of DAG file paths")
+    apps_deploy.add_argument("--artifacts", help="Comma separated list of artifact file paths")
+
     # -------------------------------------------------------------------------
     # Mirror commands
     # -------------------------------------------------------------------------
@@ -841,6 +846,58 @@ def _handle_apps(client: NX1Client, args) -> Optional[Any]:
         result = client.apps.add_dag(args.version_id, args.file, args.name)
         print(f"✅ DAG added: {result.get('id')}")
         return result
+    elif cmd == "deploy":
+        return _handle_apps_deploy(client, args)
+    return None
+
+
+def _handle_apps_deploy(client: NX1Client, args) -> Optional[Any]:
+    """Handle full app deployment: create/find app, create version, upload components, activate."""
+    app_name = args.app_name
+    version = args.version
+
+    # Find or create the app
+    apps = client.apps.get_all()
+    existing = [a for a in apps if a['app_name'] == app_name]
+    if existing:
+        app_id = existing[0]['id']
+        print(f"App '{app_name}' exists (id: {app_id})")
+    else:
+        print(f"App '{app_name}' not found. Creating...")
+        result = client.apps.create(app_name)
+        app_id = result['id']
+        print(f"✅ App created (id: {app_id})")
+
+    # Check version doesn't already exist
+    versions = client.apps.get_versions(app_id)
+    if version in [v['version_name'] for v in versions]:
+        print(f"Version '{version}' already exists. Exiting.")
+        sys.exit(1)
+
+    # Create version
+    version_result = client.apps.create_version(app_id, version)
+    version_id = version_result['id']
+    print(f"✅ Version '{version}' created (id: {version_id})")
+
+    # Upload artifacts
+    if args.artifacts:
+        for artifact_path in args.artifacts.split(','):
+            artifact_path = artifact_path.strip()
+            print(f"Uploading artifact: {artifact_path}")
+            client.apps.add_component(version_id, "artifact", artifact_path)
+            print(f"✅ Artifact added: {artifact_path}")
+
+    # Upload DAGs
+    if args.dags:
+        for dag_path in args.dags.split(','):
+            dag_path = dag_path.strip()
+            print(f"Uploading DAG: {dag_path}")
+            client.apps.add_dag(version_id, dag_path)
+            print(f"✅ DAG added: {dag_path}")
+
+    # Activate version
+    client.apps.activate_version(version_id)
+    print(f"✅ Version '{version}' activated")
     return None
 
 
