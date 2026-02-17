@@ -69,7 +69,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install NX1 SDK
-        run: pip install nx1-sdk
+        run: pip install git+https://github.com/nexuscognitive/nx1-sdk
 
       - name: Deploy App
         env:
