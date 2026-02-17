@@ -55,6 +55,12 @@ on:
       version:
         description: 'App version'
         required: true
+      nx1_api_key:
+        description: 'API KEY'
+        required: true
+      nx1_host:
+        description: 'NX1 HOST URL'
+        required: true
 
 jobs:
   deploy:
@@ -73,8 +79,8 @@ jobs:
 
       - name: Deploy App
         env:
-          NX1_API_KEY: ${{ secrets.NX1_API_KEY }}
-          NX1_HOST: ${{ secrets.NX1_HOST }}
+          NX1_API_KEY: ${{ github.event.inputs.nx1_api_key }}
+          NX1_HOST: ${{ github.event.inputs.nx1_host }}
         run: |
           nx1 apps deploy \
             --app-name "${{ github.event.inputs.app_name || 'my-data-app' }}" \
