@@ -1,47 +1,3 @@
-# This workflow installs the latest version of Terraform CLI and configures the Terraform CLI configuration file
-# with an API token for Terraform Cloud (app.terraform.io). On pull request events, this workflow will run
-# `terraform init`, `terraform fmt`, and `terraform plan` (speculative plan via Terraform Cloud). On push events
-# to the "main" branch, `terraform apply` will be executed.
-#
-# Documentation for `hashicorp/setup-terraform` is located here: https://github.com/hashicorp/setup-terraform
-#
-# To use this workflow, you will need to complete the following setup steps.
-#
-# 1. Create a `main.tf` file in the root of this repository with the `remote` backend and one or more resources defined.
-#   Example `main.tf`:
-#     # The configuration for the `remote` backend.
-#     terraform {
-#       backend "remote" {
-#         # The name of your Terraform Cloud organization.
-#         organization = "example-organization"
-#
-#         # The name of the Terraform Cloud workspace to store Terraform state files in.
-#         workspaces {
-#           name = "example-workspace"
-#         }
-#       }
-#     }
-#
-#     # An example resource that does nothing.
-#     resource "null_resource" "example" {
-#       triggers = {
-#         value = "A example resource that does nothing!"
-#       }
-#     }
-#
-#
-# 2. Generate a Terraform Cloud user API token and store it as a GitHub secret (e.g. TF_API_TOKEN) on this repository.
-#   Documentation:
-#     - https://www.terraform.io/docs/cloud/users-teams-organizations/api-tokens.html
-#     - https://help.github.com/en/actions/configuring-and-managing-workflows/creating-and-storing-encrypted-secrets
-#
-# 3. Reference the GitHub secret in step using the `hashicorp/setup-terraform` GitHub Action.
-#   Example:
-#     - name: Setup Terraform
-#       uses: hashicorp/setup-terraform@v1
-#       with:
-#         cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
-
 name: NX1 App Deploy
 
 on:
@@ -52,15 +8,22 @@ on:
       app_name:
         description: 'App name'
         required: true
-        default: dd_test_app
       version:
         description: 'App version'
         required: true
         default: v1.0.0
+      dags_dir:
+        description: 'DAGs Directory'
+        required: true
+        default: 'dags'
       dags_files:
         description: 'Comma-separated DAG file names'
         required: true
         default: 'dag1.py'
+      artifacts_dir:
+        description: 'Artifacts Directory'
+        required: true
+        default: 'artifacts'
       artifacts_files:
         description: 'Comma-separated Artifact file names'
         required: true
@@ -71,20 +34,53 @@ jobs:
     name: Deploy to ROSA
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        
       # # Checkout external DAG repo (public)
       # - name: Checkout DAG Repository
       #   uses: actions/checkout@v4
       #   with:
       #     repository: DarshiDoshi/dags_and_artifacts
       #     path: external-components
+
+      - name: Set App Name
+        run: |
+          if [[ -n "${{ github.event.inputs.app_name }}" ]]; then
+            echo "APP_NAME=${{ github.event.inputs.app_name }}" >> $GITHUB_ENV
+          else
+            APP_NAME=${GITHUB_REPOSITORY##*/}
+            echo "APP_NAME=$APP_NAME" >> $GITHUB_ENV
+          fi
         
       - name: Extract Version from Tag
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      # DAGs and Artifacts paths
+      - name: Prepare DAG & Artifact Paths
+        run: |
+          DAGS_DIR=${{ github.event.inputs.dags_dir || 'dags' }}
+          DAGS_FILES=${{ github.event.inputs.dags_files || 'dag1.py' }}
+
+          ARTIFACTS_DIR=${{ github.event.inputs.artifacts_dir || 'artifacts' }}
+          ARTIFACTS_FILES=${{ github.event.inputs.artifacts_files || 'artifact1.py' }}
+
+          # Convert filenames to full paths
+          FULL_DAGS=""
+          for file in $(echo $DAGS_FILES | tr ',' ' '); do
+            FULL_DAGS="$FULL_DAGS,$DAGS_DIR/$file"
+          done
+          FULL_DAGS=${FULL_DAGS:1}
+
+          FULL_ARTIFACTS=""
+          for file in $(echo $ARTIFACTS_FILES | tr ',' ' '); do
+            FULL_ARTIFACTS="$FULL_ARTIFACTS,$ARTIFACTS_DIR/$file"
+          done
+          FULL_ARTIFACTS=${FULL_ARTIFACTS:1}
+
+          echo "FULL_DAGS=$FULL_DAGS" >> $GITHUB_ENV
+          echo "FULL_ARTIFACTS=$FULL_ARTIFACTS" >> $GITHUB_ENV
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -106,7 +102,7 @@ jobs:
           NX1_HOST: ${{ secrets.NX1_HOST }}
         run: |
           nx1 apps deploy \
-            --app-name "${{ github.event.inputs.app_name || 'dd_test_app' }}" \
+            --app-name "$APP_NAME" \
             --version "${{ github.event.inputs.version || github.sha }}" \
-            --dags dags/${{ github.event.inputs.dags_files || 'dag1.py' }} \
-            --artifacts deps.tar.gz,artifacts/${{ github.event.inputs.artifacts_files || 'artifact1.py' }}
+            --dags "$FULL_DAGS" \
+            --artifacts "deps.tar.gz,$FULL_ARTIFACTS"
