@@ -108,5 +108,5 @@ jobs:
           nx1 apps deploy \
             --app-name "${{ github.event.inputs.app_name || 'dd_test_app' }}" \
             --version "${{ github.event.inputs.version || github.sha }}" \
-            --dags /dags/${{ github.event.inputs.dags_files || 'dag1.py' }} \
-            --artifacts deps.tar.gz,/artifacts/${{ github.event.inputs.artifacts_files || 'artifact1.py' }}
+            --dags dags/${{ github.event.inputs.dags_files || 'dag1.py' }} \
+            --artifacts deps.tar.gz,artifacts/${{ github.event.inputs.artifacts_files || 'artifact1.py' }}
