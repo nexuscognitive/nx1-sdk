@@ -52,29 +52,39 @@ on:
       app_name:
         description: 'App name'
         required: true
+        default: dd_test_app
       version:
         description: 'App version'
         required: true
-      # nx1_api_key:
-      #   description: 'API KEY'
-      #   required: true
-      # nx1_host:
-      #   description: 'NX1 HOST URL'
-      #   required: true
+        default: v1.0.0
+      dags_files:
+        description: 'Comma-separated DAG file names'
+        required: true
+        default: 'dag1.py'
+      artifacts_files:
+        description: 'Comma-separated Artifact file names'
+        required: true
+        default: 'artifact1.py'
 
 jobs:
   deploy:
+    name: Deploy to ROSA
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      # Checkout external DAG repo (public)
-      - name: Checkout DAG Repository
-        uses: actions/checkout@v4
-        with:
-          repository: DarshiDoshi/dags_and_artifacts
-          path: external-components
+      # # Checkout external DAG repo (public)
+      # - name: Checkout DAG Repository
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: DarshiDoshi/dags_and_artifacts
+      #     path: external-components
+        
+      - name: Extract Version from Tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -84,6 +94,12 @@ jobs:
       - name: Install NX1 SDK
         run: pip install git+https://github.com/nexuscognitive/nx1-sdk
 
+      - name: Package Dependencies
+        run: |
+          if [ -d "deps" ]; then
+            tar -czf deps.tar.gz deps/
+          fi
+
       - name: Deploy App
         env:
           NX1_API_KEY: ${{ secrets.NX1_API_KEY }}
@@ -92,14 +108,5 @@ jobs:
           nx1 apps deploy \
             --app-name "${{ github.event.inputs.app_name || 'dd_test_app' }}" \
             --version "${{ github.event.inputs.version || github.sha }}" \
-            --dags external-components/dags/dag1_dd.py \
-            --artifacts external-components/artifacts/artifact2.py
-            
-      - name: Activate Version
-        env:
-          NX1_API_KEY: ${{ secrets.NX1_API_KEY }}
-          NX1_HOST: ${{ secrets.NX1_HOST }}
-        run: |
-          nx1 apps activate \
-            --app-name "${{ github.event.inputs.app_name || 'dd_test_app' }}" \
-            --version "${{ github.event.inputs.version || github.sha }}"
+            --dags /dags/${{ github.event.inputs.dags_files || 'dag1.py' }} \
+            --artifacts deps.tar.gz,/artifacts/${{ github.event.inputs.artifacts_files || 'artifact1.py' }}
