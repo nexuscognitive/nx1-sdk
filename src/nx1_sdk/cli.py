@@ -734,6 +734,9 @@ def _handle_jobs(client: NX1Client, args) -> Optional[Any]:
         return result
     return None
 
+def new_handle_func(num: int) -> Optional[Any]:
+    print("temp function")
+    return true
 
 def _handle_files(client: NX1Client, args) -> Optional[Any]:
     """Handle files commands."""
