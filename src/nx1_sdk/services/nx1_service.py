@@ -88,6 +88,47 @@ class MetastoreClient:
         """Remove a domain from a specific table."""
         return self._client.delete("api", "metastore", "domains", domain, "tables", table)
 
+    def create_catalog(self, catalog: str, catalog_type: str, properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create a catalog."""
+        return self._client.post(
+            "api", "metastore", "catalogs",
+            json_data={"catalog": catalog, "catalog_type": catalog_type, "properties": properties or {}}
+        )
+
+    def delete_catalog(self, catalog: str) -> Dict[str, Any]:
+        """Delete a catalog."""
+        return self._client.delete("api", "metastore", "catalogs", catalog)
+
+    def create_schema(self, catalog: str, schema: str, properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create a schema inside a catalog."""
+        return self._client.post(
+            "api", "metastore", "catalogs", catalog, "schemas",
+            json_data={"schema_name": schema, "properties": properties or {}}
+        )
+
+    def delete_schema(self, catalog: str, schema: str) -> Dict[str, Any]:
+        """Delete an empty schema inside a catalog."""
+        return self._client.delete("api", "metastore", "catalogs", catalog, "schemas", schema)
+
+    def create_table(self, catalog: str, schema: str, table_name: str, columns: List[Dict[str, Any]], properties: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a table inside a schema."""
+        return self._client.post(
+            "api", "metastore", "catalogs", catalog, "schemas", schema, "tables",
+            json_data={"table_name": table_name, "columns": columns, "properties": properties or {}}
+        )
+
+    def delete_table(self, catalog: str, schema: str, table: str) -> Dict[str, Any]:
+        """Delete a table inside a schema."""
+        return self._client.delete("api", "metastore", "catalogs", catalog, "schemas", schema, "tables", table)
+
+    def alter_table(self, catalog: str, schema: str, table: str, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Perform multiple alter operations on a table."""
+        return self._client.patch(
+            "api", "metastore", "catalogs", catalog, "schemas", schema, "tables", table,
+            json_data={"operations": operations}
+        )
+
 
 class QueriesClient:
     """Query endpoints - ask, suggest, schedule."""

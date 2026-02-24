@@ -189,6 +189,41 @@ Configuration Priority:
     columns_p.add_argument("--catalog")
     columns_p.add_argument("--schema")
     columns_p.add_argument("--table")
+
+    create_catalog_p = subparsers.add_parser("create-catalog", parents=[parent_parser], help="Create catalog")
+    create_catalog_p.add_argument("--catalog", required=True)
+    create_catalog_p.add_argument("--type", required=True)
+    create_catalog_p.add_argument("--properties", required=True)
+    
+    delete_catalog_p = subparsers.add_parser("delete-catalog", parents=[parent_parser], help="Delete catalog")
+    delete_catalog_p.add_argument("--catalog", required=True)
+    
+    create_schema_p = subparsers.add_parser("create-schema", parents=[parent_parser], help="Create schema")
+    create_schema_p.add_argument("--catalog", required=True)
+    create_schema_p.add_argument("--schema", required=True)
+    create_schema_p.add_argument("--properties")
+    
+    delete_schema_p = subparsers.add_parser("delete-schema", parents=[parent_parser], help="Delete schema")
+    delete_schema_p.add_argument("--catalog", required=True)
+    delete_schema_p.add_argument("--schema", required=True)
+    
+    create_table_p = subparsers.add_parser("create-table", parents=[parent_parser], help="Create table")
+    create_table_p.add_argument("--catalog", required=True)
+    create_table_p.add_argument("--schema", required=True)
+    create_table_p.add_argument("--table", required=True)
+    create_table_p.add_argument("--columns", required=True)
+    create_table_p.add_argument("--properties")
+    
+    delete_table_p = subparsers.add_parser("delete-table", parents=[parent_parser], help="Delete table")
+    delete_table_p.add_argument("--catalog", required=True)
+    delete_table_p.add_argument("--schema", required=True)
+    delete_table_p.add_argument("--table", required=True)
+    
+    alter_table_p = subparsers.add_parser("alter-table", parents=[parent_parser], help="Alter table")
+    alter_table_p.add_argument("--catalog", required=True)
+    alter_table_p.add_argument("--schema", required=True)
+    alter_table_p.add_argument("--table", required=True)
+    alter_table_p.add_argument("--operations", required=True)
     
     # -------------------------------------------------------------------------
     # Query commands
@@ -582,6 +617,44 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
         return client.metastore.get_tags()
     elif args.command == "engines":
         return client.metastore.get_engines()
+    elif args.command == "create-catalog":
+        validate_required(args, ["catalog", "type", "properties"])
+        properties = json.loads(args.properties)
+        return client.metastore.create_catalog(args.catalog, args.type, properties)
+    elif args.command == "delete-catalog":
+        validate_required(args, ["catalog"])
+        response = client.metastore.delete_catalog(args.catalog)
+        if response.get("success"):
+            print(f"✔ Catalog '{args.catalog}' deleted successfully.")
+            return None
+        return response
+    elif args.command == "create-schema":
+        validate_required(args, ["catalog", "schema"])
+        properties = json.loads(args.properties) if args.properties else {}
+        return client.metastore.create_schema(args.catalog, args.schema, properties)
+    elif args.command == "delete-schema":
+        validate_required(args, ["catalog", "schema"])
+        response = client.metastore.delete_schema(args.catalog, args.schema)
+        if response.get("success"):
+            print(f"✔ Schema '{args.catalog}.{args.schema}' deleted successfully.")
+            return None
+        return response
+    elif args.command == "create-table":
+        validate_required(args, ["catalog", "schema", "table", "columns"])
+        columns = json.loads(args.columns)
+        properties = json.loads(args.properties) if args.properties else {}
+        return client.metastore.create_table(args.catalog, args.schema, args.table, columns, properties)
+    elif args.command == "delete-table":
+        validate_required(args, ["catalog", "schema", "table"])
+        response = client.metastore.delete_table(args.catalog, args.schema, args.table)
+        if response.get("success"):
+            print(f"✔ Table '{args.catalog}.{args.schema}.{args.table}' deleted successfully.")
+            return None
+        return response
+    elif args.command == "alter-table":
+        validate_required(args, ["catalog", "schema", "table", "operations"])
+        operations = json.loads(args.operations)
+        return client.metastore.alter_table(args.catalog, args.schema, args.table, operations)
     
     # Query commands
     elif args.command == "ask":
