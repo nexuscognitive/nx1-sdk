@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import logging
+import shlex
 from urllib.parse import urljoin, urlparse
 from datetime import datetime
 import urllib3
@@ -168,7 +169,7 @@ class KyuubiBatchSubmitterClient:
         batch_request = {
             "batchType": batch_type,
             "name": name,
-            "args": args.split() if isinstance(args, str) and args else args or []
+            "args": shlex.split(args) if isinstance(args, str) and args else args or []
         }
         
         # Only set resource in JSON if it's remote
