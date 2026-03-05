@@ -1048,18 +1048,21 @@ def _handle_airflow(args):
 def _handle_kyuubi(args):
     validate_required(args, ["server", "username", "resource", "name"])
 
-    inject_yunikorn_spark_configs(args)
-
     password = get_password(
         args,
         args.username,
         env_var="KYUUBI_SUBMIT_PASSWORD",
     )
 
+    logger = logging.getLogger("kyuubi-submit")
+    if getattr(args, "verbose", False):
+        logger.setLevel(logging.DEBUG)
+
     submitter = KyuubiBatchSubmitterClient(
         server=args.server,
         username=args.username,
         password=password,
+        logger=logger,
         history_server=getattr(args, "history_server", None),
     )
 
@@ -1069,7 +1072,7 @@ def _handle_kyuubi(args):
         name=args.name,
         args=getattr(args, "args", None),
         conf=getattr(args, "conf", None),
-        pyfiles=getattr(args, "pyfiles", None),
+        py_files=getattr(args, "pyfiles", None),
         jars=getattr(args, "jars", None),
         files=getattr(args, "files", None),
     )
