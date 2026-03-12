@@ -468,7 +468,7 @@ Configuration Priority:
     kyuubi_p.add_argument("--name", help="Job name")
     kyuubi_p.add_argument("--queue", help="YuniKorn queue")
     kyuubi_p.add_argument("--args", help="Job arguments")
-    kyuubi_p.add_argument("--conf", help="Spark configs")
+    kyuubi_p.add_argument("--conf", action="append", help="Spark config key=value (can be repeated, e.g. --conf k1=v1 --conf k2=v2)")
     kyuubi_p.add_argument("--pyfiles", help="PyFiles")
     kyuubi_p.add_argument("--jars", help="Jars")
     kyuubi_p.add_argument("--files", help="Files")
