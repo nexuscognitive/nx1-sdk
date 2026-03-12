@@ -79,15 +79,24 @@ class KyuubiBatchSubmitterClient:
         ext = self.get_file_extension(resource)
         return ext in self.PYTHON_EXTENSIONS
     
-    def parse_conf(self, conf_string):
-        """Parse comma-separated key=value pairs into a dictionary"""
+    def parse_conf(self, conf):
+        """Parse Spark configs into a dictionary.
+        Accepts a list of 'key=value' strings or a single comma-separated string.
+        """
         conf_dict = {}
-        if conf_string:
-            for item in conf_string.split(','):
-                item = item.strip()
-                if '=' in item:
-                    key, value = item.split('=', 1)
-                    conf_dict[key.strip()] = value.strip()
+        if not conf:
+            return conf_dict
+        items = []
+        if isinstance(conf, list):
+            for entry in conf:
+                items.extend(entry.split(','))
+        else:
+            items = conf.split(',')
+        for item in items:
+            item = item.strip()
+            if '=' in item:
+                key, value = item.split('=', 1)
+                conf_dict[key.strip()] = value.strip()
         return conf_dict
     
     def format_history_url(self, app_id):
@@ -181,10 +190,7 @@ class KyuubiBatchSubmitterClient:
             batch_request["className"] = classname
 
         # Handle conf
-        if isinstance(conf, str):
-            conf_dict = self.parse_conf(conf)
-        else:
-            conf_dict = conf or {}
+        conf_dict = self.parse_conf(conf) if conf else {}
         conf_dict["spark.submit.deployMode"] = "cluster"
         
         # Add remote pyFiles to conf (works for both JSON and multipart submissions)
