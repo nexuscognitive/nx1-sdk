@@ -59,6 +59,30 @@ class MetastoreClient:
     def get_tables(self, catalog: str, schema: str) -> Dict[str, Any]:
         """Get tables for a schema."""
         return self._client.get("api", "metastore", "catalogs", catalog, "schemas", schema, "tables")
+
+    def get_catalogs_details(self) -> Dict[str, Any]:
+        """Get detailed information for all catalogs."""
+        return self._client.get("api", "metastore", "catalogs", "details")
+    
+    def get_schemas_details(self, catalog: str) -> Dict[str, Any]:
+        """Get schema details for a catalog."""
+        return self._client.get("api", "metastore", "catalogs", catalog, "schemas", "details")
+    
+    def get_tables_details(self, catalog: str, schema: str) -> Dict[str, Any]:
+        """Get tables details for a schema."""
+        return self._client.get("api", "metastore", "catalogs", catalog, "schemas", schema, "tables", "details")
+    
+    def get_table_preview(self, catalog: str, schema: str, table: str, limit: int = 20) -> Dict[str, Any]:
+        """Get preview rows for a table."""
+        return self._client.get("api", "metastore", "catalogs", catalog, "schemas", schema, "tables", table, "preview", params={"limit": limit})
+    
+    def get_table_metadata(self, catalog: str, schema: str, table: str) -> Dict[str, Any]:
+        """Get metadata for a table."""
+        return self._client.get("api", "metastore", "catalogs", catalog, "schemas", schema, "tables", table, "metadata")
+    
+    def get_table_details(self, catalog: str, schema: str, table: str) -> Dict[str, Any]:
+        """Get detailed information for a table."""
+        return self._client.get("api", "metastore", "catalogs", catalog, "schemas", schema, "tables", table, "details")
     
     def get_columns(self, catalog: str, schema: str, table: str) -> Dict[str, Any]:
         """Get columns for a table."""

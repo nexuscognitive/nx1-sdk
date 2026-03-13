@@ -177,13 +177,37 @@ Configuration Priority:
     subparsers.add_parser("catalogs", parents=[parent_parser], help="List catalogs")
     subparsers.add_parser("tags", parents=[parent_parser], help="List all tags")
     subparsers.add_parser("engines", parents=[parent_parser], help="List supported engines")
+    subparsers.add_parser("catalogs-details", parents=[parent_parser], help="Get details of catalogs")
     
     schemas_p = subparsers.add_parser("schemas", parents=[parent_parser], help="List schemas")
     schemas_p.add_argument("--catalog")
+
+    schemas_details_p = subparsers.add_parser("schemas-details", parents=[parent_parser], help="Get schemas details for a catalog")
+    schemas_details_p.add_argument("--catalog", required=True)
     
     tables_p = subparsers.add_parser("tables", parents=[parent_parser], help="List tables")
     tables_p.add_argument("--catalog")
     tables_p.add_argument("--schema")
+    
+    tables_details_p = subparsers.add_parser("tables-details", parents=[parent_parser], help="Get tables details for a schema")
+    tables_details_p.add_argument("--catalog", required=True)
+    tables_details_p.add_argument("--schema", required=True)
+    
+    table_preview_p = subparsers.add_parser("table-preview", parents=[parent_parser], help="Preview rows from a table")
+    table_preview_p.add_argument("--catalog", required=True)
+    table_preview_p.add_argument("--schema", required=True)
+    table_preview_p.add_argument("--table", required=True)
+    table_preview_p.add_argument("--limit", type=int, default=20)
+    
+    table_metadata_p = subparsers.add_parser("table-metadata", parents=[parent_parser], help="Get metadata for a table from Datahub")
+    table_metadata_p.add_argument("--catalog", required=True)
+    table_metadata_p.add_argument("--schema", required=True)
+    table_metadata_p.add_argument("--table", required=True)
+    
+    table_details_p = subparsers.add_parser("table-details", parents=[parent_parser], help="Get detailed information for a table")
+    table_details_p.add_argument("--catalog", required=True)
+    table_details_p.add_argument("--schema", required=True)
+    table_details_p.add_argument("--table", required=True)
     
     columns_p = subparsers.add_parser("columns", parents=[parent_parser], help="List columns")
     columns_p.add_argument("--catalog")
@@ -613,6 +637,23 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     elif args.command == "columns":
         validate_required(args, ["catalog","schema","table"])
         return client.metastore.get_columns(args.catalog, args.schema, args.table)
+    elif args.command == "catalogs-details":
+        return client.metastore.get_catalogs_details()
+    elif args.command == "schemas-details":
+        validate_required(args, ["catalog"])
+        return client.metastore.get_schemas_details(args.catalog)
+    elif args.command == "tables-details":
+        validate_required(args, ["catalog","schema"])
+        return client.metastore.get_tables_details(args.catalog, args.schema)
+    elif args.command == "table-preview":
+        validate_required(args, ["catalog","schema","table"])
+        return client.metastore.get_table_preview(args.catalog, args.schema, args.table, args.limit)
+    elif args.command == "table-metadata":
+        validate_required(args, ["catalog","schema","table"])
+        return client.metastore.get_table_metadata(args.catalog, args.schema, args.table)
+    elif args.command == "table-details":
+        validate_required(args, ["catalog","schema","table"])
+        return client.metastore.get_table_details(args.catalog, args.schema, args.table)
     elif args.command == "tags":
         return client.metastore.get_tags()
     elif args.command == "engines":
