@@ -1001,7 +1001,7 @@ class AppsClient:
         """Create an app role."""
         return self._client.post(
             "api", "app", app_id, "roles",
-            json_data={"role_name": role_name}
+            params={"role_name": role_name}
         )
     
     def get_roles(self, app_id: str) -> List[Dict[str, Any]]:
