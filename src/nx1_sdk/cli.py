@@ -445,9 +445,13 @@ Configuration Priority:
     # -------------------------------------------------------------------------
     crews_p = subparsers.add_parser("crews", parents=[parent_parser], help="AI Crews")
     crews_sub = crews_p.add_subparsers(dest="crews_command")
-    crews_sub.add_parser("list", parents=[parent_parser])
-    crews_st = crews_sub.add_parser("status", parents=[parent_parser])
-    crews_st.add_argument("task_id")
+    crews_sub.add_parser("list-types", parents=[parent_parser])
+    crews_run = crews_sub.add_parser("run", parents=[parent_parser])
+    crews_run.add_argument("--crew-type", required=True,
+        choices=["ask", "data_engineering", "data_suggestion", "semantic_model"])
+    crews_run.add_argument("--input", required=True, help="JSON string of task inputs")
+    crews_result = crews_sub.add_parser("result", parents=[parent_parser])
+    crews_result.add_argument("correlation_id")
     
     # -------------------------------------------------------------------------
     # Profile management commands
@@ -1048,15 +1052,15 @@ def _handle_shares(client: NX1Client, args) -> Optional[Any]:
     return None
 
 
-def _handle_crews(client: NX1Client, args) -> Optional[Any]:
-    """Handle crews commands."""
+def _handle_crews(client, args):
     cmd = args.crews_command
-    if cmd == "list" or not cmd:
-        return client.crews.list_crews()
-    elif cmd == "status":
-        validate_required(args, ["task_id"])
-        return client.crews.get_crew_status(args.task_id)
-    return None
+    if cmd == "list-types":
+        return client.crews.list_crew_types()
+    elif cmd == "run":
+        task_input = json.loads(args.input)
+        return client.crews.run_crew(args.crew_type, task_input)
+    elif cmd == "result":
+        return client.crews.get_crew_result(args.correlation_id)
 
 def _handle_airflow(args):
     validate_required(args, ["url", "username", "dag"])

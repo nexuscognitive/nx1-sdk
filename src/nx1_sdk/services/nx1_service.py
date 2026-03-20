@@ -1107,17 +1107,15 @@ class CrewsClient:
     def __init__(self, client: BaseClient):
         self._client = client
     
-    def list_crews(self) -> List[Dict[str, Any]]:
-        """List available crews."""
-        return self._client.get("api", "crews")
-    
-    def run_crew(self, crew_name: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Run a crew with inputs."""
-        return self._client.post("api", "crews", crew_name, "run", json_data=inputs)
-    
-    def get_crew_status(self, task_id: str) -> Dict[str, Any]:
-        """Get crew task status."""
-        return self._client.get("api", "crews", "tasks", task_id)
+    def list_crew_types(self) -> List[Dict[str, Any]]:
+        return self._client.get("api", "crews", "types")
+
+    def run_crew(self, crew_type: str, task_input: Dict[str, Any]) -> Dict[str, Any]:
+        return self._client.post("api", "crews", "run",
+            json_data={"crew_type": crew_type, "task_input": task_input})
+
+    def get_crew_result(self, correlation_id: str) -> Dict[str, Any]:
+        return self._client.get("api", "crews", "results", correlation_id)
 
 
 class DataSharesClient:
