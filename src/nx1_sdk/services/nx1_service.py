@@ -227,41 +227,43 @@ class DataEngineeringClient:
     
     def ask(
         self,
-        domain: str,
+        tables: List[str],
         prompt: str,
-        target_schema: Optional[str] = None,
-        target_table: Optional[str] = None
+        job_name: str,
+        federated: bool = False,
+        preview: bool = False
     ) -> Dict[str, Any]:
-        """Ask a data engineering question."""
-        payload = {"domain": domain, "prompt": prompt}
-        if target_schema:
-            payload["target_schema"] = target_schema
-        if target_table:
-            payload["target_table"] = target_table
+        payload = {
+            "tables": tables,
+            "prompt": prompt,
+            "job_name": job_name,
+            "federated": federated,
+            "preview": preview
+        }
         return self._client.post("api", "dataeng", "ask", json_data=payload)
     
     def schedule(
         self,
-        query_id: str,
+        table: str,
+        schema_name: str,
         mode: str,
-        cron: Optional[str] = None,
-        name: Optional[str] = None,
-        target_schema: Optional[str] = None,
-        target_table: Optional[str] = None,
-        merge_keys: Optional[List[str]] = None
+        query_id: Optional[str] = None,
+        schedule: Optional[str] = None,
+        merge_columns: Optional[str] = None,
+        domain: Optional[str] = None,
+        tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Schedule a data engineering query."""
-        payload = {"query_id": query_id, "mode": mode}
-        if cron:
-            payload["cron"] = cron
-        if name:
-            payload["name"] = name
-        if target_schema:
-            payload["target_schema"] = target_schema
-        if target_table:
-            payload["target_table"] = target_table
-        if merge_keys:
-            payload["merge"] = ",".join(merge_keys)
+        payload = {"mode": mode, "table": table, "schema_name": schema_name}
+        if query_id:
+            payload["query_id"] = query_id
+        if schedule:
+            payload["schedule"] = schedule
+        if merge_columns:
+            payload["merge_columns"] = merge_columns
+        if domain:
+            payload["domain"] = domain
+        if tags:
+            payload["tags"] = tags
         return self._client.post("api", "dataeng", "schedule", json_data=payload)
 
 
