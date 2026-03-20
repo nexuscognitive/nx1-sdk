@@ -419,15 +419,15 @@ Configuration Priority:
     # -------------------------------------------------------------------------
     mirror_p = subparsers.add_parser("mirror", parents=[parent_parser], help="Create mirroring job")
     mirror_p.add_argument("--name")
-    mirror_p.add_argument("--source-catalog")
-    mirror_p.add_argument("--source-schema")
-    mirror_p.add_argument("--source-table")
-    mirror_p.add_argument("--target-catalog")
-    mirror_p.add_argument("--target-schema")
-    mirror_p.add_argument("--target-table")
-    mirror_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
+    mirror_p.add_argument("--dbtype", required=True, choices=["postgres", "mariadb", "mssql", "mysql", "oracle", "db2"])
+    mirror_p.add_argument("--include-list", required=True, help="Format: schema.table e.g. public.employees")
+    mirror_p.add_argument("--host-name", required=True)
+    mirror_p.add_argument("--port", required=True, type=int)
+    mirror_p.add_argument("--user", required=True)
+    mirror_p.add_argument("--password", required=True)
+    mirror_p.add_argument("--dbname", required=True)
+    mirror_p.add_argument("--schemas")
     mirror_p.add_argument("--schedule")
-    mirror_p.add_argument("--merge-keys")
     
     # -------------------------------------------------------------------------
     # Shares commands
@@ -1016,22 +1016,20 @@ def _handle_apps_deploy(client: NX1Client, args) -> Optional[Any]:
 
 
 def _handle_mirror(client: NX1Client, args) -> Optional[Any]:
-    """Handle mirror command."""
-    validate_required(args, ["name","source_catalog","source_schema","source_table","target_catalog","target_schema","target_table"])
-    merge_keys = args.merge_keys.split(",") if args.merge_keys else None
+    validate_required(args, ["name","dbtype","include_list","host_name","port","user","password","dbname"])
     result = client.mirroring.create(
         job_name=args.name,
-        source_catalog=args.source_catalog,
-        source_schema=args.source_schema,
-        source_table=args.source_table,
-        target_catalog=args.target_catalog,
-        target_schema=args.target_schema,
-        target_table=args.target_table,
-        mode=args.mode,
-        schedule=args.schedule,
-        merge_keys=merge_keys
+        dbtype=args.dbtype,
+        include_list=args.include_list,
+        host_name=args.host_name,
+        port=args.port,
+        user=args.user,
+        password=args.password,
+        dbname=args.dbname,
+        schemas=args.schemas,
+        schedule=args.schedule
     )
-    print(f"✅ Mirroring job created: {result.get('job_id')}")
+    print(f"✅ Mirroring job created: {result.get('id')}")
     return result
 
 

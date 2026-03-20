@@ -729,32 +729,32 @@ class DataMirroringClient:
     def create(
         self,
         job_name: str,
-        source_catalog: str,
-        source_schema: str,
-        source_table: str,
-        target_catalog: str,
-        target_schema: str,
-        target_table: str,
-        schedule: Optional[str] = None,
-        mode: str = "overwrite",
-        merge_keys: Optional[List[str]] = None
+        dbtype: str,
+        include_list: str,
+        host_name: str,
+        port: int,
+        user: str,
+        password: str,
+        dbname: str,
+        schemas: Optional[str] = None,
+        schedule: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a data mirroring job."""
         payload = {
             "job_type": "mirror",
             "job_name": job_name,
-            "source_catalog": source_catalog,
-            "source_schema": source_schema,
-            "source_table": source_table,
-            "target_catalog": target_catalog,
-            "target_schema": target_schema,
-            "target_table": target_table,
-            "mode": mode
+            "dbtype": dbtype,
+            "include_list": include_list,
+            "host_name": host_name,
+            "port": port,
+            "user": user,
+            "password": password,
+            "dbname": dbname
         }
+        if schemas:
+            payload["schemas"] = schemas
         if schedule:
             payload["schedule"] = schedule
-        if merge_keys:
-            payload["merge"] = ",".join(merge_keys)
         return self._client.post("api", "datamirroring", json_data=payload)
     
     def delete(self, job_id: str) -> str:
