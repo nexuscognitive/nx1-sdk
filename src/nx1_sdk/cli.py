@@ -345,6 +345,22 @@ Configuration Priority:
     jobs_wait.add_argument("job_id")
     jobs_wait.add_argument("--max-wait", type=int, default=300)
     jobs_wait.add_argument("--poll-interval", type=int, default=5)
+
+    jobs_create = jobs_sub.add_parser("create", parents=[parent_parser],
+        help="Create a new job record")
+    jobs_create.add_argument("--job-name", required=True, dest="job_name")
+    jobs_create.add_argument("--job-type", required=True, dest="job_type",
+        choices=["airflow.dataeng", "airflow.nlp", "airflow.ingest", "airflow.airbyte", "mirror"],
+        help="Job type: airflow.dataeng | airflow.nlp | airflow.ingest | airflow.airbyte | mirror")
+    jobs_create.add_argument("--schedule", help="Cron expression (optional)")
+
+    jobs_upd = jobs_sub.add_parser("update-status", parents=[parent_parser],
+        help="Update a job's status")
+    jobs_upd.add_argument("job_id")
+    jobs_upd.add_argument("--status", required=True,
+        choices=["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"])
+    jobs_upd.add_argument("--message", dest="status_message",
+        help="Optional status message")
     
     # -------------------------------------------------------------------------
     # Files commands
@@ -956,6 +972,20 @@ def _handle_jobs(client: NX1Client, args) -> Optional[Any]:
     elif cmd == "wait":
         result = client.jobs.wait_for_completion(args.job_id, args.max_wait, args.poll_interval)
         print(f"✅ Completed: {result.get('status')}")
+        return result
+    elif cmd == "create":
+        result = client.jobs.create(args.job_name, args.job_type,
+                                    schedule=getattr(args, "schedule", None))
+        print(f"✅ Job created:{result.get('id')}")
+        return result
+    elif cmd == "update-status":
+        validate_required(args, ["job_id"])
+        result = client.jobs.update_status(
+            args.job_id,
+            args.status,
+            status_message=getattr(args, "status_message", None)
+        )
+        print(f"✅ Status updated to{args.status}")
         return result
     return None
 
