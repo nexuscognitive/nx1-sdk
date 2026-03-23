@@ -31,7 +31,7 @@ def load_yaml_config(config_file):
 def get_password(args, username, env_var, logger_name=None):
     """Get password from args, env var, or prompt."""
     password = getattr(args, "password", None)
-
+    
     if not password:
         password = os.environ.get(env_var)
         if password and logger_name:
@@ -41,8 +41,22 @@ def get_password(args, username, env_var, logger_name=None):
 
     if not password:
         password = getpass.getpass(f"Password for {username}: ")
+    if password and password.endswith('.jceks') and os.path.isfile(password):
+        password = extract_password_from_jceks(password, username)
 
     return password
+
+def extract_password_from_jceks(jceks_path, alias):
+    """Extract a password from a JCEKS keystore file using the alias as lookup key."""
+    import jks
+    logger = logging.getLogger("kyuubi-submit")
+    logger.debug(f"Loading JCEKS keystore from {jceks_path} with alias '{alias}' for kyuubi submit")
+    keystore = jks.KeyStore.load(jceks_path, "none")
+    entry = keystore.secret_keys.get(alias)
+    if entry is None:
+        raise ValueError(f"Alias '{alias}' not found in JCEKS keystore '{jceks_path}'. "
+                         f"Available aliases: {list(keystore.secret_keys.keys())}")
+    return entry.key.decode('utf-8')
 
 def resolve_config(args):
     """
@@ -71,6 +85,32 @@ def validate_required(args, required_fields):
         raise ValueError(
             f"Missing required arguments: {', '.join(missing)}"
         )
+
+    
+def normalize_queue(queue_name):
+    if not queue_name.startswith("root."):
+        return f"root.default.{queue_name}"
+    return queue_name
+
+
+def inject_yunikorn_spark_configs(args):
+    """Sets Spark configs for YuniKorn queue labels."""
+    queue = getattr(args, "queue", None)
+    if not queue:
+        return
+    queue = normalize_queue(queue)
+    logging.getLogger('kyuubi-submit').debug(
+        f"Queue name after normalizing: {queue}"
+    )
+    # Ensure args.conf exists
+    if not getattr(args, "conf", None):
+        args.conf = []
+    # If conf is string, normalize to list
+    if isinstance(args.conf, str):
+        args.conf = [args.conf]
+    args.conf.append(f"spark.kubernetes.driver.label.queue={queue}")
+    args.conf.append(f"spark.kubernetes.executor.label.queue={queue}")
+    
 
 def format_output(data: Any, output_format: str = "json") -> str:
     """Format output data in the specified format."""
@@ -623,13 +663,14 @@ Configuration Priority:
     airflow_p.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     # -------------------------------------------------------------------------
-    # PKyuubi commands
+    # Kyuubi commands
     # -------------------------------------------------------------------------
     kyuubi_p = subparsers.add_parser("kyuubi", parents=[parent_parser], help="Submit Kyuubi batch job")
     kyuubi_p.add_argument("--server", help="Kyuubi server URL")
     kyuubi_p.add_argument("--history-server", help="Spark history server URL")
     kyuubi_p.add_argument("--username", help="Username")
     kyuubi_p.add_argument("--password", help="Password")
+    kyuubi_p.add_argument('--token', help='Bearer token for authentication (if both --password and --token are provided, password takes priority)')
     kyuubi_p.add_argument("--resource", help="Jar / Py file")
     kyuubi_p.add_argument("--classname", help="Main class")
     kyuubi_p.add_argument("--name", help="Job name")
@@ -640,7 +681,6 @@ Configuration Priority:
     kyuubi_p.add_argument("--jars", help="Jars")
     kyuubi_p.add_argument("--files", help="Files")
     kyuubi_p.add_argument("--show-logs", action="store_true")
-    kyuubi_p.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     # -------------------------------------------------------------------------
     # Parse arguments
@@ -1347,16 +1387,17 @@ def _handle_airflow(args):
 
 def _handle_kyuubi(args):
     validate_required(args, ["server", "username", "resource", "name"])
-
+    inject_yunikorn_spark_configs(args)
+    token = args.token or os.environ.get('KYUUBI_SUBMIT_TOKEN')
     password = get_password(
         args,
         args.username,
         env_var="KYUUBI_SUBMIT_PASSWORD",
     )
-
+    if not password and not token:
+        password = getpass.getpass(f"Token not provided. Provide password for {args.username}: ")
+    
     logger = logging.getLogger("kyuubi-submit")
-    if getattr(args, "verbose", False):
-        logger.setLevel(logging.DEBUG)
 
     submitter = KyuubiBatchSubmitterClient(
         server=args.server,
@@ -1364,6 +1405,7 @@ def _handle_kyuubi(args):
         password=password,
         logger=logger,
         history_server=getattr(args, "history_server", None),
+        token=getattr(args, "token", None) if not password else None,
     )
 
     batch_id = submitter.submit_batch(

@@ -21,16 +21,19 @@ class KyuubiBatchSubmitterClient:
     # Python file extensions
     PYTHON_EXTENSIONS = {'.py', '.zip', '.egg'}
 
-    def __init__(self, server, username, password, logger, history_server=None):
+    def __init__(self, server, username, password, logger, history_server=None, token=None):
         self.server = server
         self.username = username
         self.password = password
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger
         self.history_server = history_server
-
+    
         self.session = requests.Session()
-        self.session.auth = (username, password)
-        self.session.verify = False  # Disable SSL verification
+        if password:
+            self.session.auth = (username, password)
+        elif token:
+            self.session.headers["Authorization"] = f"Bearer {token}"
+        self.session.verify = False
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def is_local_file(self, path):
