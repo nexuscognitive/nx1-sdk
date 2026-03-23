@@ -913,10 +913,6 @@ class DataProductsClient:
             payload["query_id"] = query_id
         return self._client.post("api", "dataproduct", json_data=payload)
     
-    def get(self, dataproduct_id: str) -> Dict[str, Any]:
-        """Get a specific data product."""
-        return self._client.get("api", "dataproduct", dataproduct_id)
-    
     def delete(self, dataproduct_id: str) -> bool:
         """Delete a data product."""
         return self._client.delete("api", "dataproduct", dataproduct_id)

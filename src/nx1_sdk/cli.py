@@ -425,8 +425,6 @@ Configuration Priority:
     dp_p = subparsers.add_parser("dataproducts", parents=[parent_parser], help="Data products")
     dp_sub = dp_p.add_subparsers(dest="dp_command")
     dp_sub.add_parser("list", parents=[parent_parser])
-    dp_get = dp_sub.add_parser("get", parents=[parent_parser])
-    dp_get.add_argument("dataproduct_id")
     dp_del = dp_sub.add_parser("delete", parents=[parent_parser])
     dp_del.add_argument("dataproduct_id")
     
@@ -1070,8 +1068,6 @@ def _handle_dataproducts(client: NX1Client, args) -> Optional[Any]:
     cmd = args.dp_command
     if cmd == "list" or not cmd:
         return client.data_products.get_all()
-    elif cmd == "get":
-        return client.data_products.get(args.dataproduct_id)
     elif cmd == "delete":
         client.data_products.delete(args.dataproduct_id)
         print(f"✅ Deleted")
