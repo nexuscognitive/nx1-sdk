@@ -70,3 +70,10 @@ class AppVersionStatus(str, Enum):
     DRAFT = "draft"
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+class JobType(str, Enum):
+    AIRFLOW_DATAENG = "airflow.dataeng"
+    AIRFLOW_NLP     = "airflow.nlp"
+    AIRFLOW_INGEST  = "airflow.ingest"
+    AIRFLOW_AIRBYTE = "airflow.airbyte"
+    MIRROR          = "mirror"

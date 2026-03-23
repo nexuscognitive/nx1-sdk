@@ -112,6 +112,25 @@ class MetastoreClient:
         """Remove a domain from a specific table."""
         return self._client.delete("api", "metastore", "domains", domain, "tables", table)
 
+    def get_tag_associations(self) -> List[Dict[str, Any]]:
+        """Get all tag-role associations from DataHub."""
+        return self._client.get("api", "metastore", "tags", "associations")
+
+    def create_tag_role_association(
+        self, tag: str, role: str, readonly: bool = False
+    ) -> Dict[str, Any]:
+        """Create or update a tag-role association in Ranger."""
+        return self._client.post(
+            "api", "metastore", "tags", tag, "roles", role, "associate",
+            params={"readonly": readonly}
+        )
+
+    def delete_tag_role_association(self, tag: str, role: str) -> Dict[str, Any]:
+        """Delete an existing tag-role association in Ranger."""
+        return self._client.delete(
+            "api", "metastore", "tags", tag, "roles", role, "delete"
+        )
+
     def create_catalog(self, catalog: str, catalog_type: str, properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a catalog."""
         return self._client.post(
@@ -227,42 +246,51 @@ class DataEngineeringClient:
     
     def ask(
         self,
-        domain: str,
+        tables: List[str],
         prompt: str,
-        target_schema: Optional[str] = None,
-        target_table: Optional[str] = None
+        job_name: str,
+        federated: bool = False,
+        preview: bool = False
     ) -> Dict[str, Any]:
-        """Ask a data engineering question."""
-        payload = {"domain": domain, "prompt": prompt}
-        if target_schema:
-            payload["target_schema"] = target_schema
-        if target_table:
-            payload["target_table"] = target_table
+        payload = {
+            "tables": tables,
+            "prompt": prompt,
+            "job_name": job_name,
+            "federated": federated,
+            "preview": preview
+        }
         return self._client.post("api", "dataeng", "ask", json_data=payload)
     
     def schedule(
         self,
-        query_id: str,
+        table: str,
+        schema_name: str,
         mode: str,
-        cron: Optional[str] = None,
-        name: Optional[str] = None,
-        target_schema: Optional[str] = None,
-        target_table: Optional[str] = None,
-        merge_keys: Optional[List[str]] = None
+        query_id: Optional[str] = None,
+        schedule: Optional[str] = None,
+        merge_columns: Optional[str] = None,
+        domain: Optional[str] = None,
+        tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Schedule a data engineering query."""
-        payload = {"query_id": query_id, "mode": mode}
-        if cron:
-            payload["cron"] = cron
-        if name:
-            payload["name"] = name
-        if target_schema:
-            payload["target_schema"] = target_schema
-        if target_table:
-            payload["target_table"] = target_table
-        if merge_keys:
-            payload["merge"] = ",".join(merge_keys)
+        payload = {"mode": mode, "table": table, "schema_name": schema_name}
+        if query_id:
+            payload["query_id"] = query_id
+        if schedule:
+            payload["schedule"] = schedule
+        if merge_columns:
+            payload["merge_columns"] = merge_columns
+        if domain:
+            payload["domain"] = domain
+        if tags:
+            payload["tags"] = tags
         return self._client.post("api", "dataeng", "schedule", json_data=payload)
+
+    def update_query(self, query_id: str, query: str) -> Dict[str, Any]:
+        """Update the SQL text of a previously generated data engineering query."""
+        return self._client.put(
+            "api", "dataeng", "query", query_id,
+            json_data={"query": query}
+        )
 
 
 class JobsClient:
@@ -382,7 +410,7 @@ class FilesClient:
     
     def download(self, file_id: str) -> bytes:
         """Download file content."""
-        return self._client.get("api", "files", file_id, "download")
+        return self._client.get("api", "files", file_id, "content")
 
 
 class DataIngestionClient:
@@ -484,6 +512,11 @@ class DataIngestionClient:
         tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Submit a data ingestion job."""
+        if not file_format and file_path:
+            try:
+                file_format = self.detect_file_format(file_path)
+            except NX1ValidationError as e:
+                raise
         payload: Dict[str, Any] = {
             "name": name,
             "ingesttype": ingesttype.value if isinstance(ingesttype, IngestType) else ingesttype,
@@ -729,32 +762,32 @@ class DataMirroringClient:
     def create(
         self,
         job_name: str,
-        source_catalog: str,
-        source_schema: str,
-        source_table: str,
-        target_catalog: str,
-        target_schema: str,
-        target_table: str,
-        schedule: Optional[str] = None,
-        mode: str = "overwrite",
-        merge_keys: Optional[List[str]] = None
+        dbtype: str,
+        include_list: str,
+        host_name: str,
+        port: int,
+        user: str,
+        password: str,
+        dbname: str,
+        schemas: Optional[str] = None,
+        schedule: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a data mirroring job."""
         payload = {
             "job_type": "mirror",
             "job_name": job_name,
-            "source_catalog": source_catalog,
-            "source_schema": source_schema,
-            "source_table": source_table,
-            "target_catalog": target_catalog,
-            "target_schema": target_schema,
-            "target_table": target_table,
-            "mode": mode
+            "dbtype": dbtype,
+            "include_list": include_list,
+            "host_name": host_name,
+            "port": port,
+            "user": user,
+            "password": password,
+            "dbname": dbname
         }
+        if schemas:
+            payload["schemas"] = schemas
         if schedule:
             payload["schedule"] = schedule
-        if merge_keys:
-            payload["merge"] = ",".join(merge_keys)
         return self._client.post("api", "datamirroring", json_data=payload)
     
     def delete(self, job_id: str) -> str:
@@ -904,10 +937,6 @@ class DataProductsClient:
             payload["query_id"] = query_id
         return self._client.post("api", "dataproduct", json_data=payload)
     
-    def get(self, dataproduct_id: str) -> Dict[str, Any]:
-        """Get a specific data product."""
-        return self._client.get("api", "dataproduct", dataproduct_id)
-    
     def delete(self, dataproduct_id: str) -> bool:
         """Delete a data product."""
         return self._client.delete("api", "dataproduct", dataproduct_id)
@@ -990,7 +1019,7 @@ class AppsClient:
     
     def update(self, app_id: str, app_name: str) -> Dict[str, Any]:
         """Update an app."""
-        return self._client.put("api", "app", app_id, json_data={"app_name": app_name})
+        return self._client.put("api", "app", app_id, params={"app_name": app_name})
     
     def delete(self, app_id: str) -> Dict[str, Any]:
         """Delete an app and all associated data."""
@@ -1023,10 +1052,6 @@ class AppsClient:
     def get_versions(self, app_id: str) -> List[Dict[str, Any]]:
         """Get app versions."""
         return self._client.get("api", "app", app_id, "versions")
-    
-    def get_version(self, app_id: str, version_id: str) -> Dict[str, Any]:
-        """Get a specific app version."""
-        return self._client.get("api", "app", app_id, "versions", version_id)
     
     def delete_version(self, version_id: str) -> Dict[str, Any]:
         """Delete an app version (cannot delete ACTIVE versions)."""
@@ -1093,6 +1118,28 @@ class AppsClient:
                 files=files,
                 data=data
             )
+        
+    def add_artifact(
+        self,
+        version_id: str,
+        file_path: str,
+        filename: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Add an artifact component to an app version."""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found:{file_path}")
+
+        fname = filename or path.name
+
+        with open(file_path, 'rb') as f:
+            files = {'file': (fname, f)}
+            data = {'filename': fname}
+            return self._client.post(
+                "api", "app", "versions", version_id, "artifacts",
+                files=files,
+                data=data
+            )
     
     def delete_component(self, component_id: str) -> Dict[str, Any]:
         """Delete an app component."""
@@ -1105,17 +1152,15 @@ class CrewsClient:
     def __init__(self, client: BaseClient):
         self._client = client
     
-    def list_crews(self) -> List[Dict[str, Any]]:
-        """List available crews."""
-        return self._client.get("api", "crews")
-    
-    def run_crew(self, crew_name: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Run a crew with inputs."""
-        return self._client.post("api", "crews", crew_name, "run", json_data=inputs)
-    
-    def get_crew_status(self, task_id: str) -> Dict[str, Any]:
-        """Get crew task status."""
-        return self._client.get("api", "crews", "tasks", task_id)
+    def list_crew_types(self) -> List[Dict[str, Any]]:
+        return self._client.get("api", "crews", "types")
+
+    def run_crew(self, crew_type: str, task_input: Dict[str, Any]) -> Dict[str, Any]:
+        return self._client.post("api", "crews", "run",
+            json_data={"crew_type": crew_type, "task_input": task_input})
+
+    def get_crew_result(self, correlation_id: str) -> Dict[str, Any]:
+        return self._client.get("api", "crews", "results", correlation_id)
 
 
 class DataSharesClient:

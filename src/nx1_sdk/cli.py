@@ -248,16 +248,62 @@ Configuration Priority:
     alter_table_p.add_argument("--schema", required=True)
     alter_table_p.add_argument("--table", required=True)
     alter_table_p.add_argument("--operations", required=True)
+
+    subparsers.add_parser("tag-associations", parents=[parent_parser],
+        help="List all tag-role associations")
+
+    tag_assoc_p = subparsers.add_parser("create-tag-role", parents=[parent_parser],
+        help="Associate a role with a tag")
+    tag_assoc_p.add_argument("--tag", required=True, help="Tag name")
+    tag_assoc_p.add_argument("--role", required=True, help="Role name")
+    tag_assoc_p.add_argument("--readonly", action="store_true",
+        help="Grant read-only access (default: read-write)")
+
+    del_assoc_p = subparsers.add_parser("delete-tag-role", parents=[parent_parser],
+        help="Remove a role-tag association")
+    del_assoc_p.add_argument("--tag", required=True, help="Tag name")
+    del_assoc_p.add_argument("--role", required=True, help="Role name")
     
     # -------------------------------------------------------------------------
     # Query commands
     # -------------------------------------------------------------------------
     ask_p = subparsers.add_parser("ask", parents=[parent_parser], help="Ask a question")
-    ask_p.add_argument("--domain")
-    ask_p.add_argument("--prompt")
-    
+    ask_p.add_argument("--domain", required=True)
+    ask_p.add_argument("--prompt", required=True)
+
     suggest_p = subparsers.add_parser("suggest", parents=[parent_parser], help="Get suggestions")
-    suggest_p.add_argument("--domain")
+    suggest_p.add_argument("--domain", required=True)
+
+    query_p = subparsers.add_parser("query", parents=[parent_parser], help="Query management")
+    query_sub = query_p.add_subparsers(dest="query_command")
+
+    query_list_p = query_sub.add_parser("list", parents=[parent_parser], help="List recent queries")
+    query_list_p.add_argument("--limit", type=int, default=20)
+
+    query_del_p = query_sub.add_parser("delete", parents=[parent_parser], help="Delete a query")
+    query_del_p.add_argument("query_id", help="UUID of the query to delete")
+
+    query_create_p = query_sub.add_parser("create", parents=[parent_parser],
+        help="Create a query from a suggestion ID")
+    query_create_p.add_argument("--suggestion-id", required=True, dest="suggestion_id")
+
+    query_submit_p = query_sub.add_parser("submit", parents=[parent_parser],
+        help="Submit a raw SQL query")
+    query_submit_p.add_argument("--query", required=True, help="SQL query string")
+    query_submit_p.add_argument("--domain", help="Domain URN")
+
+    query_sched_p = query_sub.add_parser("schedule", parents=[parent_parser],
+        help="Schedule a query on a cron")
+    query_sched_p.add_argument("--name", required=True, help="Schedule name")
+    query_sched_p.add_argument("--cron", required=True, help="Cron expression")
+    query_sched_p.add_argument("--card-url", dest="card_url",
+        help="Card URL (mutually exclusive with --query-id)")
+    query_sched_p.add_argument("--query-id", dest="query_id",
+        help="Query ID (mutually exclusive with --card-url)")
+
+    query_embed_p = query_sub.add_parser("embed-token", parents=[parent_parser],
+        help="Get embed access token for a query visualization")
+    query_embed_p.add_argument("--query-id", required=True, dest="query_id")
     
     # -------------------------------------------------------------------------
     # File Ingestion
@@ -288,7 +334,8 @@ Configuration Priority:
     ingest_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
     ingest_p.add_argument("--file-path")
     ingest_p.add_argument("--file-id")
-    ingest_p.add_argument("--format", dest="file_format", default="csv")
+    ingest_p.add_argument("--format", dest="file_format", default=None,
+        help="File format (csv, json, parquet, xls, xlsx). Auto-detected from --file-path if not given.")
     ingest_p.add_argument("--delimiter", default=",")
     ingest_p.add_argument("--header", default="true", choices=["true", "false"])
     ingest_p.add_argument("--merge-keys")
@@ -314,6 +361,22 @@ Configuration Priority:
     jobs_wait.add_argument("job_id")
     jobs_wait.add_argument("--max-wait", type=int, default=300)
     jobs_wait.add_argument("--poll-interval", type=int, default=5)
+
+    jobs_create = jobs_sub.add_parser("create", parents=[parent_parser],
+        help="Create a new job record")
+    jobs_create.add_argument("--job-name", required=True, dest="job_name")
+    jobs_create.add_argument("--job-type", required=True, dest="job_type",
+        choices=["airflow.dataeng", "airflow.nlp", "airflow.ingest", "airflow.airbyte", "mirror"],
+        help="Job type: airflow.dataeng | airflow.nlp | airflow.ingest | airflow.airbyte | mirror")
+    jobs_create.add_argument("--schedule", help="Cron expression (optional)")
+
+    jobs_upd = jobs_sub.add_parser("update-status", parents=[parent_parser],
+        help="Update a job's status")
+    jobs_upd.add_argument("job_id")
+    jobs_upd.add_argument("--status", required=True,
+        choices=["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"])
+    jobs_upd.add_argument("--message", dest="status_message",
+        help="Optional status message")
     
     # -------------------------------------------------------------------------
     # Files commands
@@ -331,6 +394,11 @@ Configuration Priority:
     files_get.add_argument("file_id")
     files_del = files_sub.add_parser("delete", parents=[parent_parser])
     files_del.add_argument("file_id")
+    files_dl = files_sub.add_parser("download", parents=[parent_parser],
+        help="Download file content to disk")
+    files_dl.add_argument("file_id", help="UUID of the file to download")
+    files_dl.add_argument("--out", dest="output_path",
+        help="Local path to write file (default: use server filename)")
     
     # -------------------------------------------------------------------------
     # S3 commands
@@ -373,8 +441,6 @@ Configuration Priority:
     dp_p = subparsers.add_parser("dataproducts", parents=[parent_parser], help="Data products")
     dp_sub = dp_p.add_subparsers(dest="dp_command")
     dp_sub.add_parser("list", parents=[parent_parser])
-    dp_get = dp_sub.add_parser("get", parents=[parent_parser])
-    dp_get.add_argument("dataproduct_id")
     dp_del = dp_sub.add_parser("delete", parents=[parent_parser])
     dp_del.add_argument("dataproduct_id")
     
@@ -414,20 +480,55 @@ Configuration Priority:
     apps_deploy.add_argument("--dags", help="Comma separated list of DAG file paths")
     apps_deploy.add_argument("--artifacts", help="Comma separated list of artifact file paths")
 
+    apps_upd = apps_sub.add_parser("update", parents=[parent_parser],
+        help="Update an app's name")
+    apps_upd.add_argument("app_id")
+    apps_upd.add_argument("--name", required=True, help="New app name")
+
+    apps_dver = apps_sub.add_parser("delete-version", parents=[parent_parser],
+        help="Delete an app version (cannot delete ACTIVE versions)")
+    apps_dver.add_argument("version_id")
+
+    apps_drole = apps_sub.add_parser("delete-role", parents=[parent_parser],
+        help="Delete an app role")
+    apps_drole.add_argument("--app-id", required=True, dest="app_id")
+    apps_drole.add_argument("--role-id", required=True, dest="role_id")
+
+    apps_artifact = apps_sub.add_parser("add-artifact", parents=[parent_parser],
+        help="Upload an artifact to an app version")
+    apps_artifact.add_argument("--version-id", required=True, dest="version_id")
+    apps_artifact.add_argument("--file", required=True, help="Local file path")
+    apps_artifact.add_argument("--name", help="Override filename")
+
+    apps_dcomp = apps_sub.add_parser("delete-component", parents=[parent_parser],
+        help="Delete an app component")
+    apps_dcomp.add_argument("component_id")
+
     # -------------------------------------------------------------------------
     # Mirror commands
     # -------------------------------------------------------------------------
-    mirror_p = subparsers.add_parser("mirror", parents=[parent_parser], help="Create mirroring job")
-    mirror_p.add_argument("--name")
-    mirror_p.add_argument("--source-catalog")
-    mirror_p.add_argument("--source-schema")
-    mirror_p.add_argument("--source-table")
-    mirror_p.add_argument("--target-catalog")
-    mirror_p.add_argument("--target-schema")
-    mirror_p.add_argument("--target-table")
-    mirror_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
-    mirror_p.add_argument("--schedule")
-    mirror_p.add_argument("--merge-keys")
+    mirror_p = subparsers.add_parser("mirror", parents=[parent_parser],
+        help="Data mirroring jobs")
+    mirror_sub = mirror_p.add_subparsers(dest="mirror_command")
+
+    mirror_create = mirror_sub.add_parser("create", parents=[parent_parser],
+        help="Create a mirroring job")
+    mirror_create.add_argument("--name", required=True)
+    mirror_create.add_argument("--dbtype", required=True,
+        choices=["postgres", "mariadb", "mssql", "mysql", "oracle", "db2"])
+    mirror_create.add_argument("--include-list", required=True,
+        help="Format: schema.table e.g. public.employees")
+    mirror_create.add_argument("--host-name", required=True)
+    mirror_create.add_argument("--port", required=True, type=int)
+    mirror_create.add_argument("--user", required=True)
+    mirror_create.add_argument("--password", required=True)
+    mirror_create.add_argument("--dbname", required=True)
+    mirror_create.add_argument("--schemas")
+    mirror_create.add_argument("--schedule")
+
+    mirror_del = mirror_sub.add_parser("delete", parents=[parent_parser],
+        help="Delete a mirroring job")
+    mirror_del.add_argument("job_id", help="UUID of the mirroring job to delete")
     
     # -------------------------------------------------------------------------
     # Shares commands
@@ -445,9 +546,51 @@ Configuration Priority:
     # -------------------------------------------------------------------------
     crews_p = subparsers.add_parser("crews", parents=[parent_parser], help="AI Crews")
     crews_sub = crews_p.add_subparsers(dest="crews_command")
-    crews_sub.add_parser("list", parents=[parent_parser])
-    crews_st = crews_sub.add_parser("status", parents=[parent_parser])
-    crews_st.add_argument("task_id")
+    crews_sub.add_parser("list-types", parents=[parent_parser])
+    crews_run = crews_sub.add_parser("run", parents=[parent_parser])
+    crews_run.add_argument("--crew-type", required=True,
+        choices=["ask", "data_engineering", "data_suggestion", "semantic_model"])
+    crews_run.add_argument("--input", required=True, help="JSON string of task inputs")
+    crews_result = crews_sub.add_parser("result", parents=[parent_parser])
+    crews_result.add_argument("correlation_id")
+
+    # -------------------------------------------------------------------------
+    # Data Engineering commands
+    # -------------------------------------------------------------------------
+    dataeng_p = subparsers.add_parser("dataeng", parents=[parent_parser],
+        help="Data engineering pipeline")
+    dataeng_sub = dataeng_p.add_subparsers(dest="dataeng_command")
+
+    dataeng_ask = dataeng_sub.add_parser("ask", parents=[parent_parser],
+        help="Ask a data engineering question to generate a query")
+    dataeng_ask.add_argument("--tables", required=True,
+        help="Comma-separated fully-qualified table names")
+    dataeng_ask.add_argument("--prompt", required=True, help="Natural language request")
+    dataeng_ask.add_argument("--job-name", required=True, dest="job_name",
+        help="Name for the generated job")
+    dataeng_ask.add_argument("--federated", action="store_true",
+        help="Enable federated query mode")
+    dataeng_ask.add_argument("--preview", action="store_true",
+        help="Preview mode (dry run)")
+
+    dataeng_sched = dataeng_sub.add_parser("schedule", parents=[parent_parser],
+        help="Schedule a data engineering query")
+    dataeng_sched.add_argument("--table", required=True, help="Target table name")
+    dataeng_sched.add_argument("--schema", required=True, dest="schema_name",
+        help="Target schema name")
+    dataeng_sched.add_argument("--mode", required=True,
+        choices=["append", "overwrite", "merge"])
+    dataeng_sched.add_argument("--query-id", dest="query_id", help="Query ID to schedule")
+    dataeng_sched.add_argument("--schedule", help="Cron expression")
+    dataeng_sched.add_argument("--merge-columns", dest="merge_columns",
+        help="Columns for merge mode")
+    dataeng_sched.add_argument("--domain", help="Domain URN")
+    dataeng_sched.add_argument("--tags", help="Comma-separated tags")
+
+    dataeng_upd = dataeng_sub.add_parser("update-query", parents=[parent_parser],
+        help="Update the SQL of a generated query")
+    dataeng_upd.add_argument("query_id", help="Query ID to update")
+    dataeng_upd.add_argument("--query", required=True, help="New SQL string")
     
     # -------------------------------------------------------------------------
     # Profile management commands
@@ -658,6 +801,14 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
         return client.metastore.get_tags()
     elif args.command == "engines":
         return client.metastore.get_engines()
+    elif args.command == "tag-associations":
+        return client.metastore.get_tag_associations()
+    elif args.command == "create-tag-role":
+        return client.metastore.create_tag_role_association(
+            args.tag, args.role, readonly=args.readonly
+        )
+    elif args.command == "delete-tag-role":
+        return client.metastore.delete_tag_role_association(args.tag, args.role)
     elif args.command == "create-catalog":
         validate_required(args, ["catalog", "type", "properties"])
         properties = json.loads(args.properties)
@@ -704,6 +855,8 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     elif args.command == "suggest":
         validate_required(args, ["domain"])
         return client.queries.suggest(args.domain)
+    elif args.command == "query":
+        return _handle_query(client, args)
     
     # Ingest local file
     elif args.command == "ingest-file":
@@ -751,6 +904,10 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     # Crews commands
     elif args.command == "crews":
         return _handle_crews(client, args)
+
+    # Data Engineering commands
+    elif args.command == "dataeng":
+        return _handle_dataeng(client, args)
     
     return None
 
@@ -826,6 +983,38 @@ def _handle_ingest(client: NX1Client, args) -> None:
     print(f"Job ID: {result.get('job_id')}, Flow URL: {result.get('flow_url', 'N/A')}")
     return None
 
+def _handle_query(client: NX1Client, args) -> Optional[Any]:
+    """Handle query sub-commands."""
+    cmd = args.query_command
+    if cmd == "list" or not cmd:
+        return client.queries.get_queries(getattr(args, "limit", 20))
+    elif cmd == "delete":
+        validate_required(args, ["query_id"])
+        client.queries.delete_query(args.query_id)
+        print(f"✅ Deleted query:{args.query_id}")
+    elif cmd == "create":
+        result = client.queries.create_from_suggestion(args.suggestion_id)
+        print(f"✅ Query created from suggestion")
+        return result
+    elif cmd == "submit":
+        result = client.queries.submit(args.query, getattr(args, "domain", None))
+        print(f"✅ Query submitted")
+        return result
+    elif cmd == "schedule":
+        result = client.queries.schedule(
+            name=args.name,
+            cron=args.cron,
+            card_url=getattr(args, "card_url", None),
+            query_id=getattr(args, "query_id", None)
+        )
+        print(f"✅ Scheduled:{result.get('id')}")
+        return result
+    elif cmd == "embed-token":
+        token = client.queries.get_embed_token(args.query_id)
+        print(token)
+        return None
+    return None
+
 
 def _handle_jobs(client: NX1Client, args) -> Optional[Any]:
     """Handle jobs commands."""
@@ -845,6 +1034,20 @@ def _handle_jobs(client: NX1Client, args) -> Optional[Any]:
     elif cmd == "wait":
         result = client.jobs.wait_for_completion(args.job_id, args.max_wait, args.poll_interval)
         print(f"✅ Completed: {result.get('status')}")
+        return result
+    elif cmd == "create":
+        result = client.jobs.create(args.job_name, args.job_type,
+                                    schedule=getattr(args, "schedule", None))
+        print(f"✅ Job created:{result.get('id')}")
+        return result
+    elif cmd == "update-status":
+        validate_required(args, ["job_id"])
+        result = client.jobs.update_status(
+            args.job_id,
+            args.status,
+            status_message=getattr(args, "status_message", None)
+        )
+        print(f"✅ Status updated to{args.status}")
         return result
     return None
 
@@ -869,6 +1072,13 @@ def _handle_files(client: NX1Client, args) -> Optional[Any]:
     elif cmd == "delete":
         client.files.delete(args.file_id)
         print(f"✅ Deleted: {args.file_id}")
+    elif cmd == "download":
+        validate_required(args, ["file_id"])
+        content = client.files.download(args.file_id)
+        output_path = getattr(args, "output_path", None) or args.file_id
+        with open(output_path, "wb") as fh:
+            fh.write(content)
+        print(f"✅ Downloaded to:{output_path}")
     return None
 
 
@@ -917,8 +1127,6 @@ def _handle_dataproducts(client: NX1Client, args) -> Optional[Any]:
     cmd = args.dp_command
     if cmd == "list" or not cmd:
         return client.data_products.get_all()
-    elif cmd == "get":
-        return client.data_products.get(args.dataproduct_id)
     elif cmd == "delete":
         client.data_products.delete(args.dataproduct_id)
         print(f"✅ Deleted")
@@ -936,30 +1144,48 @@ def _handle_apps(client: NX1Client, args) -> Optional[Any]:
         return result
     elif cmd == "get":
         return client.apps.get(args.app_id)
+    elif cmd == "update":
+        result = client.apps.update(args.app_id, args.name)
+        print(f"✅ Updated:{args.app_id}")
+        return result
     elif cmd == "delete":
         client.apps.delete(args.app_id)
-        print(f"✅ Deleted")
+        print(f"✅ Deleted:{args.app_id}")
     elif cmd == "versions":
         return client.apps.get_versions(args.app_id)
     elif cmd == "create-version":
         result = client.apps.create_version(args.app_id, args.name)
         print(f"✅ Version created: {result.get('id')}")
         return result
+    elif cmd == "delete-version":
+        client.apps.delete_version(args.version_id)
+        print(f"✅ Version deleted:{args.version_id}")
     elif cmd == "activate":
         client.apps.activate_version(args.version_id)
-        print(f"✅ Activated")
+        print(f"✅ Activated:{args.version_id}")
     elif cmd == "roles":
         return client.apps.get_roles(args.app_id)
     elif cmd == "create-role":
         result = client.apps.create_role(args.app_id, args.name)
         print(f"✅ Role created: {result.get('id')}")
         return result
+    elif cmd == "delete-role":
+        client.apps.delete_role(args.app_id, args.role_id)
+        print(f"✅ Role deleted:{args.role_id}")
     elif cmd == "components":
         return client.apps.get_components(args.version_id)
     elif cmd == "add-dag":
         result = client.apps.add_dag(args.version_id, args.file, args.name)
         print(f"✅ DAG added: {result.get('id')}")
         return result
+    elif cmd == "add-artifact":
+        result = client.apps.add_artifact(args.version_id, args.file,
+                                           getattr(args, "name", None))
+        print(f"✅ Artifact added:{result.get('id')}")
+        return result
+    elif cmd == "delete-component":
+        client.apps.delete_component(args.component_id)
+        print(f"✅ Component deleted:{args.component_id}")
     elif cmd == "deploy":
         return _handle_apps_deploy(client, args)
     return None
@@ -1016,23 +1242,28 @@ def _handle_apps_deploy(client: NX1Client, args) -> Optional[Any]:
 
 
 def _handle_mirror(client: NX1Client, args) -> Optional[Any]:
-    """Handle mirror command."""
-    validate_required(args, ["name","source_catalog","source_schema","source_table","target_catalog","target_schema","target_table"])
-    merge_keys = args.merge_keys.split(",") if args.merge_keys else None
-    result = client.mirroring.create(
-        job_name=args.name,
-        source_catalog=args.source_catalog,
-        source_schema=args.source_schema,
-        source_table=args.source_table,
-        target_catalog=args.target_catalog,
-        target_schema=args.target_schema,
-        target_table=args.target_table,
-        mode=args.mode,
-        schedule=args.schedule,
-        merge_keys=merge_keys
-    )
-    print(f"✅ Mirroring job created: {result.get('job_id')}")
-    return result
+    cmd = args.mirror_command
+    if cmd == "create" or not cmd:
+        validate_required(args, ["name", "dbtype", "include_list", "host_name",
+                                  "port", "user", "password", "dbname"])
+        result = client.mirroring.create(
+            job_name=args.name,
+            dbtype=args.dbtype,
+            include_list=args.include_list,
+            host_name=args.host_name,
+            port=args.port,
+            user=args.user,
+            password=args.password,
+            dbname=args.dbname,
+            schemas=getattr(args, "schemas", None),
+            schedule=getattr(args, "schedule", None),
+        )
+        print(f"✅ Mirroring job created:{result.get('id')}")
+        return result
+    elif cmd == "delete":
+        client.mirroring.delete(args.job_id)
+        print(f"✅ Mirroring job deleted:{args.job_id}")
+    return None
 
 
 def _handle_shares(client: NX1Client, args) -> Optional[Any]:
@@ -1050,14 +1281,42 @@ def _handle_shares(client: NX1Client, args) -> Optional[Any]:
     return None
 
 
-def _handle_crews(client: NX1Client, args) -> Optional[Any]:
-    """Handle crews commands."""
+def _handle_crews(client, args):
     cmd = args.crews_command
-    if cmd == "list" or not cmd:
-        return client.crews.list_crews()
-    elif cmd == "status":
-        validate_required(args, ["task_id"])
-        return client.crews.get_crew_status(args.task_id)
+    if cmd == "list-types":
+        return client.crews.list_crew_types()
+    elif cmd == "run":
+        task_input = json.loads(args.input)
+        return client.crews.run_crew(args.crew_type, task_input)
+    elif cmd == "result":
+        return client.crews.get_crew_result(args.correlation_id)
+    
+def _handle_dataeng(client: NX1Client, args) -> Optional[Any]:
+    """Handle dataeng sub-commands."""
+    cmd = args.dataeng_command
+    if cmd == "ask":
+        tables = [t.strip() for t in args.tables.split(",")]
+        return client.data_engineering.ask(
+            tables=tables,
+            prompt=args.prompt,
+            job_name=args.job_name,
+            federated=args.federated,
+            preview=args.preview,
+        )
+    elif cmd == "schedule":
+        tags = args.tags.split(",") if args.tags else None
+        return client.data_engineering.schedule(
+            table=args.table,
+            schema_name=args.schema_name,
+            mode=args.mode,
+            query_id=getattr(args, "query_id", None),
+            schedule=getattr(args, "schedule", None),
+            merge_columns=getattr(args, "merge_columns", None),
+            domain=getattr(args, "domain", None),
+            tags=tags,
+        )
+    elif cmd == "update-query":
+        return client.data_engineering.update_query(args.query_id, args.query)
     return None
 
 def _handle_airflow(args):
