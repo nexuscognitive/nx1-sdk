@@ -995,7 +995,7 @@ class AppsClient:
     
     def update(self, app_id: str, app_name: str) -> Dict[str, Any]:
         """Update an app."""
-        return self._client.put("api", "app", app_id, json_data={"app_name": app_name})
+        return self._client.put("api", "app", app_id, params={"app_name": app_name})
     
     def delete(self, app_id: str) -> Dict[str, Any]:
         """Delete an app and all associated data."""
@@ -1006,7 +1006,7 @@ class AppsClient:
         """Create an app role."""
         return self._client.post(
             "api", "app", app_id, "roles",
-            json_data={"role_name": role_name}
+            params={"role_name": role_name}
         )
     
     def get_roles(self, app_id: str) -> List[Dict[str, Any]]:
@@ -1028,10 +1028,6 @@ class AppsClient:
     def get_versions(self, app_id: str) -> List[Dict[str, Any]]:
         """Get app versions."""
         return self._client.get("api", "app", app_id, "versions")
-    
-    def get_version(self, app_id: str, version_id: str) -> Dict[str, Any]:
-        """Get a specific app version."""
-        return self._client.get("api", "app", app_id, "versions", version_id)
     
     def delete_version(self, version_id: str) -> Dict[str, Any]:
         """Delete an app version (cannot delete ACTIVE versions)."""
@@ -1095,6 +1091,28 @@ class AppsClient:
             data = {'filename': fname}
             return self._client.post(
                 "api", "app", "versions", version_id, "dags",
+                files=files,
+                data=data
+            )
+        
+    def add_artifact(
+        self,
+        version_id: str,
+        file_path: str,
+        filename: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Add an artifact component to an app version."""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found:{file_path}")
+
+        fname = filename or path.name
+
+        with open(file_path, 'rb') as f:
+            files = {'file': (fname, f)}
+            data = {'filename': fname}
+            return self._client.post(
+                "api", "app", "versions", version_id, "artifacts",
                 files=files,
                 data=data
             )

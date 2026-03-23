@@ -464,6 +464,30 @@ Configuration Priority:
     apps_deploy.add_argument("--dags", help="Comma separated list of DAG file paths")
     apps_deploy.add_argument("--artifacts", help="Comma separated list of artifact file paths")
 
+    apps_upd = apps_sub.add_parser("update", parents=[parent_parser],
+        help="Update an app's name")
+    apps_upd.add_argument("app_id")
+    apps_upd.add_argument("--name", required=True, help="New app name")
+
+    apps_dver = apps_sub.add_parser("delete-version", parents=[parent_parser],
+        help="Delete an app version (cannot delete ACTIVE versions)")
+    apps_dver.add_argument("version_id")
+
+    apps_drole = apps_sub.add_parser("delete-role", parents=[parent_parser],
+        help="Delete an app role")
+    apps_drole.add_argument("--app-id", required=True, dest="app_id")
+    apps_drole.add_argument("--role-id", required=True, dest="role_id")
+
+    apps_artifact = apps_sub.add_parser("add-artifact", parents=[parent_parser],
+        help="Upload an artifact to an app version")
+    apps_artifact.add_argument("--version-id", required=True, dest="version_id")
+    apps_artifact.add_argument("--file", required=True, help="Local file path")
+    apps_artifact.add_argument("--name", help="Override filename")
+
+    apps_dcomp = apps_sub.add_parser("delete-component", parents=[parent_parser],
+        help="Delete an app component")
+    apps_dcomp.add_argument("component_id")
+
     # -------------------------------------------------------------------------
     # Mirror commands
     # -------------------------------------------------------------------------
@@ -1085,30 +1109,48 @@ def _handle_apps(client: NX1Client, args) -> Optional[Any]:
         return result
     elif cmd == "get":
         return client.apps.get(args.app_id)
+    elif cmd == "update":
+        result = client.apps.update(args.app_id, args.name)
+        print(f"✅ Updated:{args.app_id}")
+        return result
     elif cmd == "delete":
         client.apps.delete(args.app_id)
-        print(f"✅ Deleted")
+        print(f"✅ Deleted:{args.app_id}")
     elif cmd == "versions":
         return client.apps.get_versions(args.app_id)
     elif cmd == "create-version":
         result = client.apps.create_version(args.app_id, args.name)
         print(f"✅ Version created: {result.get('id')}")
         return result
+    elif cmd == "delete-version":
+        client.apps.delete_version(args.version_id)
+        print(f"✅ Version deleted:{args.version_id}")
     elif cmd == "activate":
         client.apps.activate_version(args.version_id)
-        print(f"✅ Activated")
+        print(f"✅ Activated:{args.version_id}")
     elif cmd == "roles":
         return client.apps.get_roles(args.app_id)
     elif cmd == "create-role":
         result = client.apps.create_role(args.app_id, args.name)
         print(f"✅ Role created: {result.get('id')}")
         return result
+    elif cmd == "delete-role":
+        client.apps.delete_role(args.app_id, args.role_id)
+        print(f"✅ Role deleted:{args.role_id}")
     elif cmd == "components":
         return client.apps.get_components(args.version_id)
     elif cmd == "add-dag":
         result = client.apps.add_dag(args.version_id, args.file, args.name)
         print(f"✅ DAG added: {result.get('id')}")
         return result
+    elif cmd == "add-artifact":
+        result = client.apps.add_artifact(args.version_id, args.file,
+                                           getattr(args, "name", None))
+        print(f"✅ Artifact added:{result.get('id')}")
+        return result
+    elif cmd == "delete-component":
+        client.apps.delete_component(args.component_id)
+        print(f"✅ Component deleted:{args.component_id}")
     elif cmd == "deploy":
         return _handle_apps_deploy(client, args)
     return None
