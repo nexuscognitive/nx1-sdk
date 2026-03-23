@@ -61,7 +61,7 @@ class SparkDataType(str, Enum):
 class AppComponentType(str, Enum):
     """Type of app component."""
     DAG = "dag"
-    DEPENDENCY = "dependency"
+    DEPENDENCY = "artifact"
     CONFIG = "config"
 
 
