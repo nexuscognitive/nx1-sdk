@@ -378,6 +378,11 @@ Configuration Priority:
     files_get.add_argument("file_id")
     files_del = files_sub.add_parser("delete", parents=[parent_parser])
     files_del.add_argument("file_id")
+    files_dl = files_sub.add_parser("download", parents=[parent_parser],
+        help="Download file content to disk")
+    files_dl.add_argument("file_id", help="UUID of the file to download")
+    files_dl.add_argument("--out", dest="output_path",
+        help="Local path to write file (default: use server filename)")
     
     # -------------------------------------------------------------------------
     # S3 commands
@@ -1010,6 +1015,13 @@ def _handle_files(client: NX1Client, args) -> Optional[Any]:
     elif cmd == "delete":
         client.files.delete(args.file_id)
         print(f"✅ Deleted: {args.file_id}")
+    elif cmd == "download":
+        validate_required(args, ["file_id"])
+        content = client.files.download(args.file_id)
+        output_path = getattr(args, "output_path", None) or args.file_id
+        with open(output_path, "wb") as fh:
+            fh.write(content)
+        print(f"✅ Downloaded to:{output_path}")
     return None
 
 

@@ -391,7 +391,7 @@ class FilesClient:
     
     def download(self, file_id: str) -> bytes:
         """Download file content."""
-        return self._client.get("api", "files", file_id, "download")
+        return self._client.get("api", "files", file_id, "content")
 
 
 class DataIngestionClient:
