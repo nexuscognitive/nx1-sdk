@@ -334,7 +334,8 @@ Configuration Priority:
     ingest_p.add_argument("--mode", default="overwrite", choices=["append", "overwrite", "merge"])
     ingest_p.add_argument("--file-path")
     ingest_p.add_argument("--file-id")
-    ingest_p.add_argument("--format", dest="file_format", default="csv")
+    ingest_p.add_argument("--format", dest="file_format", default=None,
+        help="File format (csv, json, parquet, xls, xlsx). Auto-detected from --file-path if not given.")
     ingest_p.add_argument("--delimiter", default=",")
     ingest_p.add_argument("--header", default="true", choices=["true", "false"])
     ingest_p.add_argument("--merge-keys")

@@ -512,6 +512,11 @@ class DataIngestionClient:
         tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Submit a data ingestion job."""
+        if not file_format and file_path:
+            try:
+                file_format = self.detect_file_format(file_path)
+            except NX1ValidationError as e:
+                raise
         payload: Dict[str, Any] = {
             "name": name,
             "ingesttype": ingesttype.value if isinstance(ingesttype, IngestType) else ingesttype,
