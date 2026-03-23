@@ -248,6 +248,21 @@ Configuration Priority:
     alter_table_p.add_argument("--schema", required=True)
     alter_table_p.add_argument("--table", required=True)
     alter_table_p.add_argument("--operations", required=True)
+
+    subparsers.add_parser("tag-associations", parents=[parent_parser],
+        help="List all tag-role associations")
+
+    tag_assoc_p = subparsers.add_parser("create-tag-role", parents=[parent_parser],
+        help="Associate a role with a tag")
+    tag_assoc_p.add_argument("--tag", required=True, help="Tag name")
+    tag_assoc_p.add_argument("--role", required=True, help="Role name")
+    tag_assoc_p.add_argument("--readonly", action="store_true",
+        help="Grant read-only access (default: read-write)")
+
+    del_assoc_p = subparsers.add_parser("delete-tag-role", parents=[parent_parser],
+        help="Remove a role-tag association")
+    del_assoc_p.add_argument("--tag", required=True, help="Tag name")
+    del_assoc_p.add_argument("--role", required=True, help="Role name")
     
     # -------------------------------------------------------------------------
     # Query commands
@@ -785,6 +800,14 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
         return client.metastore.get_tags()
     elif args.command == "engines":
         return client.metastore.get_engines()
+    elif args.command == "tag-associations":
+        return client.metastore.get_tag_associations()
+    elif args.command == "create-tag-role":
+        return client.metastore.create_tag_role_association(
+            args.tag, args.role, readonly=args.readonly
+        )
+    elif args.command == "delete-tag-role":
+        return client.metastore.delete_tag_role_association(args.tag, args.role)
     elif args.command == "create-catalog":
         validate_required(args, ["catalog", "type", "properties"])
         properties = json.loads(args.properties)

@@ -112,6 +112,25 @@ class MetastoreClient:
         """Remove a domain from a specific table."""
         return self._client.delete("api", "metastore", "domains", domain, "tables", table)
 
+    def get_tag_associations(self) -> List[Dict[str, Any]]:
+        """Get all tag-role associations from DataHub."""
+        return self._client.get("api", "metastore", "tags", "associations")
+
+    def create_tag_role_association(
+        self, tag: str, role: str, readonly: bool = False
+    ) -> Dict[str, Any]:
+        """Create or update a tag-role association in Ranger."""
+        return self._client.post(
+            "api", "metastore", "tags", tag, "roles", role, "associate",
+            params={"readonly": readonly}
+        )
+
+    def delete_tag_role_association(self, tag: str, role: str) -> Dict[str, Any]:
+        """Delete an existing tag-role association in Ranger."""
+        return self._client.delete(
+            "api", "metastore", "tags", tag, "roles", role, "delete"
+        )
+
     def create_catalog(self, catalog: str, catalog_type: str, properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a catalog."""
         return self._client.post(
