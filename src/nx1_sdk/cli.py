@@ -253,11 +253,42 @@ Configuration Priority:
     # Query commands
     # -------------------------------------------------------------------------
     ask_p = subparsers.add_parser("ask", parents=[parent_parser], help="Ask a question")
-    ask_p.add_argument("--domain")
-    ask_p.add_argument("--prompt")
-    
+    ask_p.add_argument("--domain", required=True)
+    ask_p.add_argument("--prompt", required=True)
+
     suggest_p = subparsers.add_parser("suggest", parents=[parent_parser], help="Get suggestions")
-    suggest_p.add_argument("--domain")
+    suggest_p.add_argument("--domain", required=True)
+
+    query_p = subparsers.add_parser("query", parents=[parent_parser], help="Query management")
+    query_sub = query_p.add_subparsers(dest="query_command")
+
+    query_list_p = query_sub.add_parser("list", parents=[parent_parser], help="List recent queries")
+    query_list_p.add_argument("--limit", type=int, default=20)
+
+    query_del_p = query_sub.add_parser("delete", parents=[parent_parser], help="Delete a query")
+    query_del_p.add_argument("query_id", help="UUID of the query to delete")
+
+    query_create_p = query_sub.add_parser("create", parents=[parent_parser],
+        help="Create a query from a suggestion ID")
+    query_create_p.add_argument("--suggestion-id", required=True, dest="suggestion_id")
+
+    query_submit_p = query_sub.add_parser("submit", parents=[parent_parser],
+        help="Submit a raw SQL query")
+    query_submit_p.add_argument("--query", required=True, help="SQL query string")
+    query_submit_p.add_argument("--domain", help="Domain URN")
+
+    query_sched_p = query_sub.add_parser("schedule", parents=[parent_parser],
+        help="Schedule a query on a cron")
+    query_sched_p.add_argument("--name", required=True, help="Schedule name")
+    query_sched_p.add_argument("--cron", required=True, help="Cron expression")
+    query_sched_p.add_argument("--card-url", dest="card_url",
+        help="Card URL (mutually exclusive with --query-id)")
+    query_sched_p.add_argument("--query-id", dest="query_id",
+        help="Query ID (mutually exclusive with --card-url)")
+
+    query_embed_p = query_sub.add_parser("embed-token", parents=[parent_parser],
+        help="Get embed access token for a query visualization")
+    query_embed_p.add_argument("--query-id", required=True, dest="query_id")
     
     # -------------------------------------------------------------------------
     # File Ingestion
@@ -452,6 +483,44 @@ Configuration Priority:
     crews_run.add_argument("--input", required=True, help="JSON string of task inputs")
     crews_result = crews_sub.add_parser("result", parents=[parent_parser])
     crews_result.add_argument("correlation_id")
+
+    # -------------------------------------------------------------------------
+    # Data Engineering commands
+    # -------------------------------------------------------------------------
+    dataeng_p = subparsers.add_parser("dataeng", parents=[parent_parser],
+        help="Data engineering pipeline")
+    dataeng_sub = dataeng_p.add_subparsers(dest="dataeng_command")
+
+    dataeng_ask = dataeng_sub.add_parser("ask", parents=[parent_parser],
+        help="Ask a data engineering question to generate a query")
+    dataeng_ask.add_argument("--tables", required=True,
+        help="Comma-separated fully-qualified table names")
+    dataeng_ask.add_argument("--prompt", required=True, help="Natural language request")
+    dataeng_ask.add_argument("--job-name", required=True, dest="job_name",
+        help="Name for the generated job")
+    dataeng_ask.add_argument("--federated", action="store_true",
+        help="Enable federated query mode")
+    dataeng_ask.add_argument("--preview", action="store_true",
+        help="Preview mode (dry run)")
+
+    dataeng_sched = dataeng_sub.add_parser("schedule", parents=[parent_parser],
+        help="Schedule a data engineering query")
+    dataeng_sched.add_argument("--table", required=True, help="Target table name")
+    dataeng_sched.add_argument("--schema", required=True, dest="schema_name",
+        help="Target schema name")
+    dataeng_sched.add_argument("--mode", required=True,
+        choices=["append", "overwrite", "merge"])
+    dataeng_sched.add_argument("--query-id", dest="query_id", help="Query ID to schedule")
+    dataeng_sched.add_argument("--schedule", help="Cron expression")
+    dataeng_sched.add_argument("--merge-columns", dest="merge_columns",
+        help="Columns for merge mode")
+    dataeng_sched.add_argument("--domain", help="Domain URN")
+    dataeng_sched.add_argument("--tags", help="Comma-separated tags")
+
+    dataeng_upd = dataeng_sub.add_parser("update-query", parents=[parent_parser],
+        help="Update the SQL of a generated query")
+    dataeng_upd.add_argument("query_id", help="Query ID to update")
+    dataeng_upd.add_argument("--query", required=True, help="New SQL string")
     
     # -------------------------------------------------------------------------
     # Profile management commands
@@ -708,6 +777,8 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     elif args.command == "suggest":
         validate_required(args, ["domain"])
         return client.queries.suggest(args.domain)
+    elif args.command == "query":
+        return _handle_query(client, args)
     
     # Ingest local file
     elif args.command == "ingest-file":
@@ -755,6 +826,10 @@ def _execute_command(client: NX1Client, args) -> Optional[Any]:
     # Crews commands
     elif args.command == "crews":
         return _handle_crews(client, args)
+
+    # Data Engineering commands
+    elif args.command == "dataeng":
+        return _handle_dataeng(client, args)
     
     return None
 
@@ -828,6 +903,38 @@ def _handle_ingest(client: NX1Client, args) -> None:
         schedule=args.schedule
     )
     print(f"Job ID: {result.get('job_id')}, Flow URL: {result.get('flow_url', 'N/A')}")
+    return None
+
+def _handle_query(client: NX1Client, args) -> Optional[Any]:
+    """Handle query sub-commands."""
+    cmd = args.query_command
+    if cmd == "list" or not cmd:
+        return client.queries.get_queries(getattr(args, "limit", 20))
+    elif cmd == "delete":
+        validate_required(args, ["query_id"])
+        client.queries.delete_query(args.query_id)
+        print(f"✅ Deleted query:{args.query_id}")
+    elif cmd == "create":
+        result = client.queries.create_from_suggestion(args.suggestion_id)
+        print(f"✅ Query created from suggestion")
+        return result
+    elif cmd == "submit":
+        result = client.queries.submit(args.query, getattr(args, "domain", None))
+        print(f"✅ Query submitted")
+        return result
+    elif cmd == "schedule":
+        result = client.queries.schedule(
+            name=args.name,
+            cron=args.cron,
+            card_url=getattr(args, "card_url", None),
+            query_id=getattr(args, "query_id", None)
+        )
+        print(f"✅ Scheduled:{result.get('id')}")
+        return result
+    elif cmd == "embed-token":
+        token = client.queries.get_embed_token(args.query_id)
+        print(token)
+        return None
     return None
 
 
@@ -1061,6 +1168,34 @@ def _handle_crews(client, args):
         return client.crews.run_crew(args.crew_type, task_input)
     elif cmd == "result":
         return client.crews.get_crew_result(args.correlation_id)
+    
+def _handle_dataeng(client: NX1Client, args) -> Optional[Any]:
+    """Handle dataeng sub-commands."""
+    cmd = args.dataeng_command
+    if cmd == "ask":
+        tables = [t.strip() for t in args.tables.split(",")]
+        return client.data_engineering.ask(
+            tables=tables,
+            prompt=args.prompt,
+            job_name=args.job_name,
+            federated=args.federated,
+            preview=args.preview,
+        )
+    elif cmd == "schedule":
+        tags = args.tags.split(",") if args.tags else None
+        return client.data_engineering.schedule(
+            table=args.table,
+            schema_name=args.schema_name,
+            mode=args.mode,
+            query_id=getattr(args, "query_id", None),
+            schedule=getattr(args, "schedule", None),
+            merge_columns=getattr(args, "merge_columns", None),
+            domain=getattr(args, "domain", None),
+            tags=tags,
+        )
+    elif cmd == "update-query":
+        return client.data_engineering.update_query(args.query_id, args.query)
+    return None
 
 def _handle_airflow(args):
     validate_required(args, ["url", "username", "dag"])

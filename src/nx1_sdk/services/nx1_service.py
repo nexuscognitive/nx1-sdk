@@ -266,6 +266,13 @@ class DataEngineeringClient:
             payload["tags"] = tags
         return self._client.post("api", "dataeng", "schedule", json_data=payload)
 
+    def update_query(self, query_id: str, query: str) -> Dict[str, Any]:
+        """Update the SQL text of a previously generated data engineering query."""
+        return self._client.put(
+            "api", "dataeng", "query", query_id,
+            json_data={"query": query}
+        )
+
 
 class JobsClient:
     """Jobs management endpoints."""
