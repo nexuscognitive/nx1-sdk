@@ -60,7 +60,7 @@ class SupersetClient:
 
         self._session = requests.Session()
         self._session.headers.update({
-            "Authorization": f"Bearer {token}",
+            "Authorization-PSK": token,
             "Content-Type": "application/json",
         })
 
