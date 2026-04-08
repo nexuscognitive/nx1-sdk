@@ -1,255 +1,100 @@
-"""Superset service client for Apache Superset API."""
+"""Superset service client that calls the NX1 Analytics API endpoints."""
 
-import json
 import logging
-import warnings
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
 
 import requests
-from urllib3.exceptions import InsecureRequestWarning
 
-from nx1_sdk.exceptions import NX1APIError, NX1TimeoutError, NX1ValidationError
+from nx1_sdk.exceptions import NX1APIError, NX1ValidationError
 
 
 class SupersetClient:
     """
-    Client for Apache Superset REST API.
-
-    Authenticates via username/password to obtain a Bearer token,
-    then fetches a CSRF token for state-changing requests.
+    Client for the NX1 Analytics API (backed by Apache Superset).
 
     Usage:
         from nx1_sdk.services.superset_service import SupersetClient
 
         client = SupersetClient(
-            host="https://superset-rapid.rapid.nx1cloud.com",
-            username="trino-admin",
-            password="secret",
+            host="https://api.nx1cloud.com",
+            token="<bearer-token>",
         )
 
         dashboards = client.get_dashboards()
         datasets   = client.get_datasets()
         databases  = client.get_databases()
-        result     = client.execute_sql(database_id=1, sql="show catalogs;")
+        info       = client.get_dataset_info()
+        result     = client.execute_sql(sql="show catalogs;", database_id=1)
     """
 
     def __init__(
         self,
         host: str,
-        username: str,
-        password: str,
-        provider: str = "db",
+        token: str,
         verify_ssl: bool = True,
         timeout: int = 30,
         logger: Optional[logging.Logger] = None,
     ):
         """
-        Initialize and authenticate the Superset client.
+        Initialize the Superset client.
 
         Args:
-            host: Base URL of the Superset instance.
-            username: Superset username.
-            password: Superset password.
-            provider: Auth provider, default ``db``.
+            host: Base URL of the NX1 API (e.g. ``https://api.nx1cloud.com``).
+            token: Bearer token for authentication.
             verify_ssl: Whether to verify SSL certificates.
             timeout: Request timeout in seconds.
             logger: Optional custom logger instance.
 
         Raises:
-            NX1ValidationError: If host/username/password are missing.
-            NX1APIError: If authentication fails.
+            NX1ValidationError: If host or token are missing.
         """
         if not host:
-            raise NX1ValidationError("Superset host is required.")
-        if not username:
-            raise NX1ValidationError("Superset username is required.")
-        if not password:
-            raise NX1ValidationError("Superset password is required.")
+            raise NX1ValidationError("host is required.")
+        if not token:
+            raise NX1ValidationError("token is required.")
 
-        parsed = urlparse(host)
-        if not parsed.scheme:
-            host = f"https://{host}"
-        elif parsed.scheme == "http":
-            host = host.replace("http://", "https://", 1)
-
-        self.base_url = host.rstrip("/") + "/"
-        self.username = username
-        self.password = password
-        self.provider = provider
-        self.verify_ssl = verify_ssl
-        self.timeout = timeout
         self.logger = logger or logging.getLogger(__name__)
+        self.timeout = timeout
+        self._verify_ssl = verify_ssl
+        self._base_url = host.rstrip("/") + "/api/analytics"
 
-        if not self.verify_ssl:
-            warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-
-        self._access_token: Optional[str] = None
-        self._csrf_token: Optional[str] = None
-
-        # Authenticate on init
-        self._login()
-
-    # ------------------------------------------------------------------
-    # Auth helpers
-    # ------------------------------------------------------------------
-
-    def _login(self) -> None:
-        """POST /api/v1/security/login and store the access token."""
-        url = self._url("api/v1/security/login")
-        payload = {
-            "username": self.username,
-            "password": self.password,
-            "provider": self.provider,
-            "refresh": True,
-        }
-        self.logger.debug("Superset login: POST %s", url)
-        try:
-            response = requests.post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                verify=self.verify_ssl,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            data = response.json()
-            self._access_token = data["access_token"]
-            self.logger.debug("Superset login successful.")
-        except requests.exceptions.HTTPError as e:
-            detail = _safe_json(e.response)
-            raise NX1APIError(
-                f"Superset login failed HTTP {e.response.status_code}: {detail}",
-                status_code=e.response.status_code if e.response else None,
-                response=detail,
-            )
-        except requests.exceptions.Timeout:
-            raise NX1TimeoutError(f"Superset login timed out after {self.timeout}s")
-        except requests.exceptions.RequestException as e:
-            raise NX1APIError(f"Superset login request failed: {e}")
-
-    def _fetch_csrf_token(self) -> str:
-        """GET /api/v1/security/csrf_token/ and return the token."""
-        url = self._url("api/v1/security/csrf_token/")
-        self.logger.debug("Fetching CSRF token: GET %s", url)
-        try:
-            response = requests.get(
-                url,
-                headers=self._auth_headers(),
-                verify=self.verify_ssl,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            data = response.json()
-            token = data.get("result") or data.get("csrf_token") or data.get("token")
-            if not token:
-                raise NX1APIError(f"CSRF token not found in response: {data}")
-            self._csrf_token = token
-            self.logger.debug("CSRF token obtained.")
-            return token
-        except requests.exceptions.HTTPError as e:
-            detail = _safe_json(e.response)
-            raise NX1APIError(
-                f"CSRF token fetch failed HTTP {e.response.status_code}: {detail}",
-                status_code=e.response.status_code if e.response else None,
-                response=detail,
-            )
-        except requests.exceptions.Timeout:
-            raise NX1TimeoutError(f"CSRF token fetch timed out after {self.timeout}s")
-        except requests.exceptions.RequestException as e:
-            raise NX1APIError(f"CSRF token request failed: {e}")
-
-    def get_csrf_token(self) -> str:
-        """Return cached CSRF token, fetching it first if needed."""
-        if not self._csrf_token:
-            self._fetch_csrf_token()
-        return self._csrf_token  # type: ignore[return-value]
-
-    def _url(self, *path_parts: str) -> str:
-        path = "/".join(p.strip("/") for p in path_parts if p)
-        return urljoin(self.base_url, path)
-
-    def _auth_headers(self, include_csrf: bool = False) -> Dict[str, str]:
-        headers: Dict[str, str] = {
-            "Authorization": f"Bearer {self._access_token}",
-            "Accept": "application/json",
+        self._session = requests.Session()
+        self._session.headers.update({
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-        }
-        if include_csrf:
-            headers["X-CSRFToken"] = self.get_csrf_token()
-        return headers
-
-    def _request(
-        self,
-        method: str,
-        *path_parts: str,
-        params: Optional[Dict] = None,
-        json_data: Optional[Dict] = None,
-        include_csrf: bool = False,
-    ) -> Any:
-        url = self._url(*path_parts)
-        headers = self._auth_headers(include_csrf=include_csrf)
-        self.logger.debug("%s %s", method, url)
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                params=params,
-                json=json_data,
-                headers=headers,
-                verify=self.verify_ssl,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            if not response.content:
-                return {}
-            try:
-                return response.json()
-            except json.JSONDecodeError:
-                return {"text": response.text}
-        except requests.exceptions.HTTPError as e:
-            detail = _safe_json(e.response)
-            raise NX1APIError(
-                f"HTTP {e.response.status_code}: {detail}",
-                status_code=e.response.status_code if e.response else None,
-                response=detail,
-            )
-        except requests.exceptions.Timeout:
-            raise NX1TimeoutError(f"Request timed out after {self.timeout}s")
-        except requests.exceptions.RequestException as e:
-            raise NX1APIError(f"Request failed: {e}")
-
-    # ------------------------------------------------------------------
-    # Dashboard endpoints
-    # ------------------------------------------------------------------
-
-    def get_dashboards(self) -> Dict[str, Any]:
-        """GET /api/v1/dashboard/ — list all dashboards."""
-        return self._request("GET", "api/v1/dashboard/")
-
-    def get_dashboard(self, dashboard_id: int) -> Dict[str, Any]:
-        """GET /api/v1/dashboard/{id} — get a specific dashboard."""
-        return self._request("GET", "api/v1/dashboard", str(dashboard_id))
-
-    # ------------------------------------------------------------------
-    # Dataset endpoints
-    # ------------------------------------------------------------------
-
-    def get_datasets(self) -> Dict[str, Any]:
-        """GET /api/v1/dataset/ — list all datasets."""
-        return self._request("GET", "api/v1/dataset/")
-
-    def get_dataset_info(self) -> Dict[str, Any]:
-        """GET /api/v1/dataset/_info — metadata about the dataset resource."""
-        return self._request("GET", "api/v1/dataset/_info")
+        })
 
     # ------------------------------------------------------------------
     # Database endpoints
     # ------------------------------------------------------------------
 
-    def get_databases(self) -> Dict[str, Any]:
-        """GET /api/v1/database/ — list all databases."""
-        return self._request("GET", "api/v1/database/")
+    def get_databases(self) -> List[Dict[str, Any]]:
+        """GET /api/analytics/databases — list all Superset databases."""
+        return self._get("/databases")
+
+    # ------------------------------------------------------------------
+    # Dashboard endpoints
+    # ------------------------------------------------------------------
+
+    def get_dashboards(self) -> List[Dict[str, Any]]:
+        """GET /api/analytics/dashboards — list all Superset dashboards."""
+        return self._get("/dashboards")
+
+    def get_dashboard(self, dashboard_id: int) -> Dict[str, Any]:
+        """GET /api/analytics/dashboards/{dashboard_id} — get a dashboard by ID."""
+        return self._get(f"/dashboards/{dashboard_id}")
+
+    # ------------------------------------------------------------------
+    # Dataset endpoints
+    # ------------------------------------------------------------------
+
+    def get_datasets(self) -> List[Dict[str, Any]]:
+        """GET /api/analytics/datasets — list all Superset datasets."""
+        return self._get("/datasets")
+
+    def get_dataset_info(self) -> Dict[str, Any]:
+        """GET /api/analytics/datasets/info — dataset resource metadata."""
+        return self._get("/datasets/info")
 
     # ------------------------------------------------------------------
     # SQL execution
@@ -262,15 +107,9 @@ class SupersetClient:
         schema: Optional[str] = None,
         catalog: Optional[str] = None,
         query_limit: int = 1000,
-        run_async: bool = False,
-        sql_editor_id: str = "11",
-        tab: str = "Untitled Query 1",
     ) -> Dict[str, Any]:
         """
-        POST /api/v1/sqllab/execute/ — run a SQL statement.
-
-        Requires both Bearer token (Authorization header) and CSRF token
-        (X-CSRFToken header).
+        POST /api/analytics/sql — execute a SQL statement via SQLLab.
 
         Args:
             sql: SQL statement to execute.
@@ -278,44 +117,56 @@ class SupersetClient:
             schema: Optional schema name.
             catalog: Optional catalog name.
             query_limit: Max rows to return.
-            run_async: Whether to run asynchronously.
-            sql_editor_id: SQL editor session ID.
-            tab: Tab label shown in the UI.
 
         Returns:
-            JSON response with query results.
+            Dict with ``query_id``, ``status``, ``columns``, and ``data`` keys.
         """
         payload: Dict[str, Any] = {
-            "catalog": catalog,
-            "database_id": database_id,
-            "schema": schema,
             "sql": sql,
-            "json": True,
-            "runAsync": run_async,
-            "select_as_cta": False,
-            "expand_data": True,
-            "queryLimit": query_limit,
-            "ctas_method": "TABLE",
-            "sql_editor_id": sql_editor_id,
-            "tab": tab,
-            "tmp_table_name": "",
+            "database_id": database_id,
+            "query_limit": query_limit,
         }
-        return self._request(
-            "POST",
-            "api/v1/sqllab/execute/",
-            json_data=payload,
-            include_csrf=True,
+        if schema is not None:
+            payload["schema"] = schema
+        if catalog is not None:
+            payload["catalog"] = catalog
+
+        return self._post("/sql", payload)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get(self, path: str) -> Any:
+        url = self._base_url + path
+        try:
+            response = self._session.get(url, timeout=self.timeout, verify=self._verify_ssl)
+            self._raise_for_status(response)
+            return response.json()
+        except NX1APIError:
+            raise
+        except Exception as e:
+            raise NX1APIError(f"GET {path} failed: {e}")
+
+    def _post(self, path: str, payload: Dict[str, Any]) -> Any:
+        url = self._base_url + path
+        try:
+            response = self._session.post(url, json=payload, timeout=self.timeout, verify=self._verify_ssl)
+            self._raise_for_status(response)
+            return response.json()
+        except NX1APIError:
+            raise
+        except Exception as e:
+            raise NX1APIError(f"POST {path} failed: {e}")
+
+    def _raise_for_status(self, response: requests.Response) -> None:
+        if response.ok:
+            return
+        try:
+            detail = response.json().get("detail", response.text)
+        except Exception:
+            detail = response.text
+        raise NX1APIError(
+            f"Analytics API error {response.status_code}: {detail}",
+            status_code=response.status_code,
         )
-
-
-# ------------------------------------------------------------------
-# Internal helper
-# ------------------------------------------------------------------
-
-def _safe_json(response: Optional[requests.Response]) -> Any:
-    if response is None:
-        return {}
-    try:
-        return response.json()
-    except Exception:
-        return {"text": response.text}
