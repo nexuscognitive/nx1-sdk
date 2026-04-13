@@ -13,6 +13,7 @@ Usage:
 
 from nx1_sdk.client import NX1Client, create_client
 from nx1_sdk.services.superset_service import SupersetClient
+from nx1_sdk.services.jupyterhub_services import JupyterHubClient
 from nx1_sdk.enums import (
     IngestType,
     IngestMode,
@@ -75,6 +76,7 @@ __all__ = [
     "save_profile",
     "delete_profile",
     "resolve_config",
+    "JupyterHubClient",
     # Metadata
     "SupersetClient",
     "__version__",
