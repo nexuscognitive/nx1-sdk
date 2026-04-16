@@ -726,12 +726,13 @@ class DataIngestionClient:
         
         # Step 3: Trigger job
         log("\n3. Triggering job...")
+        """
         try:
             self._jobs_client.trigger(str(job_id))
             log("   ✓ Job triggered")
         except Exception as e:
             log(f"   Note: Job trigger returned: {e} (may auto-start)")
-        
+        """
         # Step 4: Wait for completion
         if wait_for_completion:
             log(f"\n4. Waiting for completion (max {max_wait}s)...")
