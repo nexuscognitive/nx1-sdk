@@ -1146,6 +1146,47 @@ class AppsClient:
         """Delete an app component."""
         return self._client.delete("api", "app", "components", component_id)
 
+    # App Secret Operations
+    def list_secrets(self, app_id: str) -> List[Dict[str, Any]]:
+        """List all secrets for an app (values always masked)."""
+        return self._client.get("api", "app", app_id, "secrets")
+
+    def create_secret(
+        self,
+        app_id: str,
+        secret_name: str,
+        data: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """Create a new K8s opaque secret for an app."""
+        return self._client.post(
+            "api", "app", app_id, "secrets",
+            json_data={"secret_name": secret_name, "data": data},
+        )
+
+    def get_secret(self, app_id: str, secret_name: str) -> Dict[str, Any]:
+        """Get a secret with masked values."""
+        return self._client.get("api", "app", app_id, "secrets", secret_name)
+
+    def reveal_secret(self, app_id: str, secret_name: str) -> Dict[str, Any]:
+        """Reveal a secret's actual decoded values."""
+        return self._client.get("api", "app", app_id, "secrets", secret_name, "reveal")
+
+    def update_secret(
+        self,
+        app_id: str,
+        secret_name: str,
+        data: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """Replace all data in an existing K8s secret."""
+        return self._client.put(
+            "api", "app", app_id, "secrets", secret_name,
+            json_data={"data": data},
+        )
+
+    def delete_secret(self, app_id: str, secret_name: str) -> Dict[str, Any]:
+        """Delete a K8s secret."""
+        return self._client.delete("api", "app", app_id, "secrets", secret_name)
+
 
 class CrewsClient:
     """AI Crews endpoints."""
