@@ -1,0 +1,5 @@
+persona: sdk-dev
+setup:
+  - pip install -e ".[dev]"
+start:
+  - nx1 ping
