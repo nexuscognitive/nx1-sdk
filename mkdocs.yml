@@ -1,4 +1,5 @@
 site_name: nx1-sdk
+docs_dir: .
 plugins:
   - techdocs-core
 nav:
