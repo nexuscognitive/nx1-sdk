@@ -1,0 +1,16 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: nx1-sdk
+  description: Python SDK for the NX1 NLP Agent API
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    github.com/project-slug: nexuscognitive/nx1-sdk
+  tags:
+    - python
+    - sdk
+spec:
+  type: library
+  lifecycle: production
+  owner: nx1-platform-team
+  system: nx1-client-libraries
