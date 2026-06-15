@@ -13,6 +13,41 @@ import websocket
 
 from nx1_sdk.exceptions import NX1APIError, NX1ValidationError
 
+# Jupyter kernel WebSocket subprotocol. Modern jupyter_server frames kernel
+# messages as a single binary payload using this protocol rather than JSON text
+# frames; the client must negotiate it and (de)serialize accordingly.
+_KERNEL_WS_PROTOCOL = "v1.kernel.websocket.jupyter.org"
+
+
+def _serialize_ws_v1(msg: Dict[str, Any], channel: str) -> bytes:
+    """Pack a Jupyter message into a v1-protocol binary WebSocket frame."""
+    parts = [
+        json.dumps(msg.get(key, {})).encode("utf-8")
+        for key in ("header", "parent_header", "metadata", "content")
+    ]
+    channel_bytes = channel.encode("utf-8")
+    # Offsets: one for the channel, then one per message part.
+    offsets = [8 * (1 + 1 + len(parts) + 1)]
+    offsets.append(len(channel_bytes) + offsets[-1])
+    for part in parts:
+        offsets.append(len(part) + offsets[-1])
+    offset_count = len(offsets).to_bytes(8, "little")
+    offset_table = b"".join(o.to_bytes(8, "little") for o in offsets)
+    return b"".join([offset_count, offset_table, channel_bytes] + parts)
+
+
+def _deserialize_ws_v1(frame: bytes) -> Dict[str, Any]:
+    """Unpack a v1-protocol binary WebSocket frame into a Jupyter message dict."""
+    offset_count = int.from_bytes(frame[:8], "little")
+    offsets = [
+        int.from_bytes(frame[8 * (i + 1):8 * (i + 2)], "little")
+        for i in range(offset_count)
+    ]
+    parts = [frame[offsets[i]:offsets[i + 1]] for i in range(1, offset_count - 1)]
+    keys = ("header", "parent_header", "metadata", "content")
+    msg = {key: json.loads(parts[i]) for i, key in enumerate(keys) if i < len(parts)}
+    return msg
+
 
 class JupyterHubClient:
     """
@@ -110,6 +145,32 @@ class JupyterHubClient:
                 status_code=resp.status_code,
             )
 
+    def _ensure_xsrf(self) -> None:
+        """
+        Prime the ``_xsrf`` token required by the single-user Jupyter Server.
+
+        Token auth alone is enough for the Hub API, but the user server enforces
+        XSRF protection on state-changing requests (POST/DELETE) whenever the
+        request carries cookies — which our persistent session does. We issue a
+        GET to a user-server route so the server sets the ``_xsrf`` cookie, then
+        echo it back as the ``X-XSRFToken`` header on subsequent requests.
+        """
+        resp = self._session.get(
+            f"{self._user_api}/api/terminals",
+            verify=self.verify_ssl,
+            timeout=self.timeout,
+        )
+        xsrf = self._session.cookies.get("_xsrf")
+        if xsrf:
+            self._session.headers["X-XSRFToken"] = xsrf
+            self.log.debug("Primed _xsrf token for user-server requests")
+        else:
+            self.log.warning(
+                "No _xsrf cookie returned by %s (status %d) — POSTs may be rejected",
+                resp.url,
+                resp.status_code,
+            )
+
     # ------------------------------------------------------------------
     # Server lifecycle
     # ------------------------------------------------------------------
@@ -198,6 +259,7 @@ class JupyterHubClient:
             Dict with ``name`` key (terminal identifier).
         """
         url = f"{self._user_api}/api/terminals"
+        self._ensure_xsrf()
         self.log.info("POST %s — launching terminal", url)
         resp = self._session.post(url, json={}, verify=self.verify_ssl, timeout=self.timeout)
         self._raise_for_status(resp, f"POST {url}")
@@ -353,6 +415,7 @@ class JupyterHubClient:
             "type": session_type,
             "kernel": {"name": kernel_name},
         }
+        self._ensure_xsrf()
         self.log.info("POST %s — creating session for %s", url, path)
         resp = self._session.post(url, json=payload, verify=self.verify_ssl, timeout=self.timeout)
         self._raise_for_status(resp, f"POST {url}")
@@ -429,6 +492,16 @@ class JupyterHubClient:
         output_parts: List[str] = []
         execution_done = threading.Event()
         ws_ref: list = []
+        # Completion requires BOTH the shell-channel execute_reply AND the
+        # iopub-channel "idle" status for our msg_id. These two race, and the
+        # stream output (iopub) frequently arrives *after* execute_reply — so
+        # closing on execute_reply alone drops the output. See _maybe_finish().
+        state = {"got_reply": False, "got_idle": False}
+
+        def _maybe_finish(ws_obj):
+            if state["got_reply"] and state["got_idle"]:
+                execution_done.set()
+                ws_obj.close()
 
         execute_request = {
             "header": {
@@ -455,13 +528,22 @@ class JupyterHubClient:
 
         def on_open(ws_obj):
             ws_ref.append(ws_obj)
-            ws_obj.send(json.dumps(execute_request))
+            ws_obj.send(
+                _serialize_ws_v1(execute_request, execute_request["channel"]),
+                opcode=websocket.ABNF.OPCODE_BINARY,
+            )
             self.log.debug("execute_request sent (msg_id=%s)", msg_id)
 
         def on_message(ws_obj, message):
+            # Modern jupyter_server uses the v1 binary protocol; older servers
+            # send JSON text frames. Support both.
             try:
-                msg = json.loads(message)
-            except Exception:
+                if isinstance(message, (bytes, bytearray)):
+                    msg = _deserialize_ws_v1(message)
+                else:
+                    msg = json.loads(message)
+            except Exception as exc:
+                self.log.debug("Failed to decode kernel WS frame: %s", exc)
                 return
 
             msg_type = msg.get("msg_type") or msg.get("header", {}).get("msg_type", "")
@@ -489,13 +571,19 @@ class JupyterHubClient:
                     f"ERROR {content.get('ename')}: {content.get('evalue')}\n{tb}"
                 )
 
+            elif msg_type == "status":
+                if msg.get("content", {}).get("execution_state") == "idle":
+                    self.log.debug("kernel idle status received")
+                    state["got_idle"] = True
+                    _maybe_finish(ws_obj)
+
             elif msg_type == "execute_reply":
                 self.log.debug(
                     "execute_reply received — status=%s",
                     msg.get("content", {}).get("status"),
                 )
-                execution_done.set()
-                ws_obj.close()
+                state["got_reply"] = True
+                _maybe_finish(ws_obj)
 
         def on_error(ws_obj, error):
             self.log.warning("Kernel WS error: %s", error)
@@ -505,6 +593,7 @@ class JupyterHubClient:
         ws = websocket.WebSocketApp(
             ws_url,
             header={"Authorization": f"token {self.token}"},
+            subprotocols=[_KERNEL_WS_PROTOCOL],
             on_open=on_open,
             on_message=on_message,
             on_error=on_error,
