@@ -307,8 +307,11 @@ class JupyterHubClient:
         Returns:
             Captured stdout text.
         """
-        # Use user-server encoding (@-preserving) for the WebSocket path
-        path = f"/user/{self._username_user_encoded}/api/terminals/websocket/{terminal_name}"
+        # Use user-server encoding (@-preserving) for the WebSocket path.
+        # NOTE: the terminal WebSocket lives at /terminals/websocket/{name} —
+        # NOT under /api/ (unlike the REST terminal endpoints and unlike the
+        # kernel channels WS). Adding /api/ here returns a 404 handshake.
+        path = f"/user/{self._username_user_encoded}/terminals/websocket/{terminal_name}"
         ws_url = self._ws_url(path)
         self.log.info("Connecting to terminal WS: %s", ws_url)
 
@@ -340,6 +343,7 @@ class JupyterHubClient:
         sslopt = {"cert_reqs": 0} if not self.verify_ssl else {}
         ws = websocket.WebSocketApp(
             ws_url,
+            header={"Authorization": f"token {self.token}"},
             on_open=on_open,
             on_message=on_message,
             on_error=on_error,
@@ -376,15 +380,22 @@ class JupyterHubClient:
 
         cmd_repr = repr(parts)
         kernel_timeout = max(5, int(timeout) - 5)
+        ws_timeout = kernel_timeout + 10
         code = (
-            "import subprocess as _sp, sys as _sys\n"
-            f"_r = _sp.run({cmd_repr}, capture_output=True, text=True, timeout={kernel_timeout})\n"
-            "print(_r.stdout, end='')\n"
-            "if _r.returncode != 0 and _r.stderr:\n"
-            "    print(_r.stderr, end='')\n"
+            "import subprocess as _sp\n"
+            "try:\n"
+            f"    _r = _sp.run({cmd_repr}, stdout=_sp.PIPE, stderr=_sp.STDOUT,"
+            f" text=True, timeout={kernel_timeout})\n"
+            "    print(_r.stdout, end='')\n"
+            "except _sp.TimeoutExpired as _e:\n"
+            f"    _o = _e.stdout or ''\n"
+            "    print(_o.decode() if isinstance(_o, bytes) else _o, end='')\n"
+            f"    print('\\n[command timed out after {kernel_timeout}s]', end='')\n"
+            "except Exception as _e:\n"
+            "    print('[command error] ' + repr(_e), end='')\n"
         )
         self.log.info("Running command via kernel subprocess: %r", command)
-        return self.run_kernel_code(code=code, timeout=timeout)
+        return self.run_kernel_code(code=code, timeout=ws_timeout)
 
     # ------------------------------------------------------------------
     # Session / Notebook API
@@ -489,8 +500,12 @@ class JupyterHubClient:
         self.log.info("Connecting to kernel WS: %s", ws_url)
 
         msg_id = str(uuid.uuid4())
+        info_msg_id = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
         output_parts: List[str] = []
         execution_done = threading.Event()
+        ready_to_exec = threading.Event()   # set once the kernel answers us
+        sent_box = {"executed": False, "proto": None}
         ws_ref: list = []
         # Completion requires BOTH the shell-channel execute_reply AND the
         # iopub-channel "idle" status for our msg_id. These two race, and the
@@ -503,15 +518,27 @@ class JupyterHubClient:
                 execution_done.set()
                 ws_obj.close()
 
-        execute_request = {
-            "header": {
-                "msg_id": msg_id,
-                "msg_type": "execute_request",
+        def _header(mid, mtype):
+            return {
+                "msg_id": mid,
+                "msg_type": mtype,
                 "username": self.username,   # original username for protocol payload
-                "session": str(uuid.uuid4()),
+                "session": session_id,
                 "date": datetime.now(timezone.utc).isoformat(),
                 "version": "5.3",
-            },
+            }
+
+        kernel_info_request = {
+            "header": _header(info_msg_id, "kernel_info_request"),
+            "parent_header": {},
+            "metadata": {},
+            "content": {},
+            "buffers": [],
+            "channel": "shell",
+        }
+
+        execute_request = {
+            "header": _header(msg_id, "execute_request"),
             "parent_header": {},
             "metadata": {},
             "content": {
@@ -526,13 +553,45 @@ class JupyterHubClient:
             "channel": "shell",
         }
 
+        def _send(ws_obj, message):
+            if sent_box["proto"] == _KERNEL_WS_PROTOCOL:
+                ws_obj.send(
+                    _serialize_ws_v1(message, message["channel"]),
+                    opcode=websocket.ABNF.OPCODE_BINARY,
+                )
+            else:
+                ws_obj.send(json.dumps(message))
+
         def on_open(ws_obj):
             ws_ref.append(ws_obj)
-            ws_obj.send(
-                _serialize_ws_v1(execute_request, execute_request["channel"]),
-                opcode=websocket.ABNF.OPCODE_BINARY,
-            )
-            self.log.debug("execute_request sent (msg_id=%s)", msg_id)
+            negotiated = None
+            sock = getattr(ws_obj, "sock", None)
+            if sock is not None:
+                negotiated = getattr(sock, "subprotocol", None)
+                if not negotiated:
+                    hr = getattr(sock, "handshake_response", None)
+                    negotiated = getattr(hr, "subprotocol", None) if hr else None
+            sent_box["proto"] = negotiated
+            self.log.info("Kernel WS negotiated subprotocol: %r", negotiated)
+
+            # jupyter_server can drop the FIRST client message — on_open fires
+            # the moment the WS upgrades, before the server has wired the
+            # kernel<->WS relay. kernel_info_request is idempotent, so resend
+            # it until the kernel answers, then fire execute_request exactly
+            # once (see kernel_info_reply handling in on_message).
+            def _probe():
+                for attempt in range(20):
+                    if ready_to_exec.is_set() or execution_done.is_set():
+                        return
+                    try:
+                        _send(ws_obj, kernel_info_request)
+                        self.log.debug("kernel_info_request sent (attempt %d)", attempt + 1)
+                    except Exception as exc:
+                        self.log.debug("kernel_info_request send failed: %s", exc)
+                        return
+                    ready_to_exec.wait(timeout=1.0)
+
+            threading.Thread(target=_probe, daemon=True).start()
 
         def on_message(ws_obj, message):
             # Modern jupyter_server uses the v1 binary protocol; older servers
@@ -548,6 +607,23 @@ class JupyterHubClient:
 
             msg_type = msg.get("msg_type") or msg.get("header", {}).get("msg_type", "")
             parent_id = msg.get("parent_header", {}).get("msg_id", "")
+            self.log.debug(
+                "kernel frame: type=%s parent=%s (mine=%s)",
+                msg_type, parent_id, parent_id == msg_id,
+            )
+
+            if msg_type == "kernel_info_reply" and not sent_box["executed"]:
+                sent_box["executed"] = True
+                ready_to_exec.set()
+                try:
+                    _send(ws_obj, execute_request)
+                    self.log.debug(
+                        "execute_request sent (msg_id=%s, protocol=%s)",
+                        msg_id, sent_box["proto"] or "json",
+                    )
+                except Exception as exc:
+                    self.log.warning("execute_request send failed: %s", exc)
+                return
 
             # Only handle replies to our specific request
             if parent_id != msg_id:
