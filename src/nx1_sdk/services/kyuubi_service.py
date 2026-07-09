@@ -354,13 +354,18 @@ class KyuubiBatchSubmitterClient:
             return None
         return response.json()
     
-    def get_batch_logs(self, batch_id, from_index=0, size=1000):
-        """Get batch logs"""
-        url = urljoin(self.server, f"/api/v1/batches/{batch_id}/localLog")
+    def get_batch_logs(self, batch_id, from_index=0, size=1000, log_type='localLog'):
+        """Get batch logs.
+
+        log_type:
+          'localLog'  - Kyuubi's submission-side log (spark-submit console output).
+          'driverLog' - the Spark driver's own log (application output) from the backend.
+        """
+        url = urljoin(self.server, f"/api/v1/batches/{batch_id}/{log_type}")
         params = {"from": from_index, "size": size}
         response = self.session.get(url, params=params)
         if response.status_code != 200:
-            self.logger.warning(f"Error getting logs: {response.status_code}")
+            self.logger.warning(f"Error getting {log_type}: {response.status_code}")
             return None
         return response.json()
     
@@ -389,8 +394,76 @@ class KyuubiBatchSubmitterClient:
         
         print("="*132 + "\n")
         self.logger.info(f"Retrieved {total_printed} log lines")
-    
-    def monitor_job(self, batch_id, show_logs=True):
+
+    # Safety bound for driverLog paging: cap total lines so a server that does not
+    # honour the 'from' offset can never cause an unbounded loop.
+    DRIVER_LOG_MAX_LINES = 1_000_000
+
+    def print_all_driver_logs(self, batch_id):
+        """Retrieve and print the Spark driver logs (application output).
+
+        Unlike localLog, the driverLog endpoint does not return a reliable 'total',
+        so termination relies on three guards:
+          1. a short/empty page marks the end of the log;
+          2. a page identical to the previous one means the server is not honouring
+             the 'from' offset (no progress) - stop rather than loop forever;
+          3. a hard DRIVER_LOG_MAX_LINES cap bounds output in any case.
+        """
+        self.logger.info("Retrieving Spark driver logs...")
+
+        from_index = 0
+        size = 1000
+        total_printed = 0
+        printed_header = False
+        prev_rows = None
+        truncated = False
+
+        while True:
+            log_data = self.get_batch_logs(batch_id, from_index, size, log_type='driverLog')
+            if not log_data:
+                break
+            log_rows = log_data.get('logRowSet', [])
+            if not log_rows:
+                break
+
+            # Guard 2: server ignored 'from' and returned the same page again.
+            if prev_rows is not None and log_rows == prev_rows:
+                self.logger.warning(
+                    "Driver log pagination did not advance (server may not support "
+                    "paging); stopping to avoid a loop."
+                )
+                break
+            prev_rows = log_rows
+
+            if not printed_header:
+                print("\n" + "="*60 + " DRIVER LOG " + "="*60)
+                printed_header = True
+
+            for row in log_rows:
+                print(row)
+                total_printed += 1
+                if total_printed >= self.DRIVER_LOG_MAX_LINES:
+                    truncated = True
+                    break
+
+            if truncated:
+                break
+            # Guard 1: no dependable 'total'; a short/empty page is the last one.
+            if len(log_rows) < size:
+                break
+            from_index += len(log_rows)
+
+        if printed_header:
+            print("="*132 + "\n")
+            if truncated:
+                self.logger.warning(
+                    f"Driver log output truncated at {self.DRIVER_LOG_MAX_LINES} lines"
+                )
+            self.logger.info(f"Retrieved {total_printed} driver log lines")
+        else:
+            self.logger.info("No driver logs available")
+
+    def monitor_job(self, batch_id, show_logs=True, show_driver_logs=False):
         """Monitor job until completion"""
         self.logger.info(f"Monitoring batch {batch_id}")
         
@@ -445,6 +518,8 @@ class KyuubiBatchSubmitterClient:
                             self.print_all_logs(batch_id)
                         else:
                             self.logger.info("Logs available but not displayed (use --show-logs to see them)")
+                        if show_driver_logs:
+                            self.print_all_driver_logs(batch_id)
                         return app_state if app_state else state
                     
                     elif state in ['ERROR', 'CANCELLED']:
@@ -456,6 +531,8 @@ class KyuubiBatchSubmitterClient:
                             self.logger.error(f"Application diagnostics: {app_diagnostic}")
                         if show_logs:
                             self.print_all_logs(batch_id)
+                        if show_driver_logs:
+                            self.print_all_driver_logs(batch_id)
                         return state
                 
             except Exception as e:

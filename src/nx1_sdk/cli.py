@@ -680,7 +680,8 @@ Configuration Priority:
     kyuubi_p.add_argument("--pyfiles", help="PyFiles")
     kyuubi_p.add_argument("--jars", help="Jars")
     kyuubi_p.add_argument("--files", help="Files")
-    kyuubi_p.add_argument("--show-logs", action="store_true")
+    kyuubi_p.add_argument("--show-logs", action="store_true", help="Display the Kyuubi submission log after completion")
+    kyuubi_p.add_argument("--driver-logs", action="store_true", help="Display the Spark driver logs (application output) after completion")
     
     # -------------------------------------------------------------------------
     # Parse arguments
@@ -1422,6 +1423,7 @@ def _handle_kyuubi(args):
     final_state = submitter.monitor_job(
         batch_id,
         show_logs=getattr(args, "show_logs", False),
+        show_driver_logs=getattr(args, "driver_logs", False),
     )
 
     return {
