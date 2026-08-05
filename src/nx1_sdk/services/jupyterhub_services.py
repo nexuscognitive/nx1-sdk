@@ -152,11 +152,12 @@ class JupyterHubClient:
         Token auth alone is enough for the Hub API, but the user server enforces
         XSRF protection on state-changing requests (POST/DELETE) whenever the
         request carries cookies — which our persistent session does. We issue a
-        GET to a user-server route so the server sets the ``_xsrf`` cookie, then
-        echo it back as the ``X-XSRFToken`` header on subsequent requests.
+        GET to the server's base URL so it sets the ``_xsrf`` cookie, then echo
+        it back as the ``X-XSRFToken`` header on subsequent requests. The base
+        (HTML) route reliably sets the cookie; JSON API routes may not.
         """
         resp = self._session.get(
-            f"{self._user_api}/api/terminals",
+            f"{self._user_api}/",
             verify=self.verify_ssl,
             timeout=self.timeout,
         )
@@ -177,25 +178,31 @@ class JupyterHubClient:
 
     def is_server_running(self) -> bool:
         """
-        Check whether the user's single-user server is currently running.
+        Check whether the user's single-user server is fully ready.
 
-        Hits GET /hub/api/users/{username} and inspects the ``server`` field.
+        Hits GET /hub/api/users/{username}. A server is only "running" once the
+        Hub reports it *ready* — i.e. spawn finished AND the proxy route is live.
+        A server that merely exists but is still spawning (``ready: false`` /
+        ``pending: "spawn"``) is NOT ready: requests to ``/user/{name}/...`` get
+        bounced to ``/hub/user/...`` and return 424 until the route is added.
 
         Returns:
-            True if the server is running, False otherwise.
+            True only when the server is ready to serve requests.
         """
         url = f"{self._hub_api}/users/{self._username_encoded}"
         self.log.debug("GET %s", url)
         resp = self._session.get(url, verify=self.verify_ssl, timeout=self.timeout)
         self._raise_for_status(resp, f"GET {url}")
         data = resp.json()
-        server = data.get("server") or data.get("servers", {})
-        # server is a non-empty string/dict when running
-        if isinstance(server, dict):
-            running = bool(server)
+
+        # Prefer the per-server ``ready`` flag (authoritative). Fall back to the
+        # top-level fields for older Hub responses that omit ``servers``.
+        servers = data.get("servers") or {}
+        if servers:
+            running = any(bool(s.get("ready")) for s in servers.values())
         else:
-            running = bool(server)
-        self.log.info("Server running: %s", running)
+            running = bool(data.get("server")) and not data.get("pending")
+        self.log.info("Server ready: %s", running)
         return running
 
     def start_server(self) -> Dict[str, Any]:
