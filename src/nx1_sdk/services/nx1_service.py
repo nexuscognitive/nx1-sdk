@@ -16,6 +16,10 @@ from nx1_sdk.enums import (
 )
 from nx1_sdk.exceptions import NX1APIError, NX1Error, NX1TimeoutError, NX1ValidationError
 
+# Distinguishes "argument not supplied" from an explicit None, where None is
+# itself meaningful (see CredentialsClient._auth_headers).
+_UNSET: Any = object()
+
 
 class HealthClient:
     """Health check endpoints."""
@@ -897,6 +901,118 @@ class S3Client:
     def refresh(self) -> Dict[str, Any]:
         """Manually refresh all S3 buckets."""
         return self._client.post("api", "s3", "refresh")
+
+
+class CredentialsClient:
+    """Identity and S3 credential-vending endpoints.
+
+    This is the credential path every compute engine uses to reach object
+    storage: Spark, Kyuubi, Hive Metastore, Gravitino and JupyterLab all resolve
+    their S3 keys through `vend_s3()` via their credential providers, and
+    authenticate with the platform PSK rather than as an end user.
+
+    Two properties of the vend response are worth stating up front, because
+    callers routinely assume otherwise:
+
+      * `session_token` is always null. The API declares the field but never
+        populates it on any resolution path.
+      * There is no expiry field of any kind. These are **static** keys.
+        Short-lived/STS credentials and per-user scoping are documented v1
+        non-goals, so a vended credential is valid until the underlying key is
+        rotated out of band.
+
+    Resolution is keyed on the bucket name alone — the requesting identity
+    authorizes the call but is not an input to the lookup, so every caller
+    entitled to vend for a bucket receives the same credential and its scope is
+    the whole bucket.
+    """
+
+    def __init__(self, client: BaseClient):
+        self._client = client
+
+    def _auth_headers(
+        self,
+        psk: Optional[str] = _UNSET,
+        token: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Build a per-request auth override.
+
+        Returns None to leave the client's configured PSK in place.
+
+        Args:
+            psk: Leave unset to use the client's configured PSK. Pass a string
+                to send that value instead, or None to send no PSK header at
+                all (an unauthenticated request).
+            token: A Keycloak access token, sent as `Authorization: Bearer`.
+                Required by the endpoints that reject PSK auth. Takes priority
+                over any PSK the server also receives.
+        """
+        headers: Dict[str, Any] = {}
+        if psk is not _UNSET:
+            # None propagates through to BaseClient, which drops the header.
+            headers["Authorization-PSK"] = psk
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers or None
+
+    def vend_s3(
+        self,
+        bucket: Optional[str] = None,
+        psk: Optional[str] = _UNSET,
+        token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Vend S3 credentials for a bucket.
+
+        Calls `GET api/s3/credentials/{bucket}`, or `GET api/s3/credentials`
+        when `bucket` is omitted, which resolves the tenant default independent
+        of any bucket.
+
+        An unregistered bucket name does **not** 404 — it falls back to the
+        tenant default and echoes the requested name back in `bucket`. A 404
+        means no default is configured either.
+
+        Args:
+            bucket: The bucket to vend for. Omit for the tenant default.
+            psk: See `_auth_headers`. Pass None for an unauthenticated request.
+            token: A Keycloak access token to use instead of PSK auth.
+
+        Returns:
+            `bucket`, `endpoint`, `region`, `path_style`, `access_key`,
+            `secret_key`, `session_token` (always null) and `source`
+            ('bucket' for a registered override, 'default' for the fallback).
+
+        Raises:
+            NX1APIError: On any non-2xx, including a refused authentication.
+        """
+        path = ("api", "s3", "credentials", bucket) if bucket else ("api", "s3", "credentials")
+        return self._client.get(*path, headers=self._auth_headers(psk, token))
+
+    def whoami(
+        self,
+        psk: Optional[str] = _UNSET,
+        token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Resolve the identity and roles the platform sees for this caller.
+
+        Calls `GET api/identity/whoami`. Accepts any authenticated principal —
+        no specific role is required.
+
+        Args:
+            psk: See `_auth_headers`.
+            token: A Keycloak access token to use instead of PSK auth.
+
+        Returns:
+            `sub`, `preferred_username` (the literal 'psk' when authenticated
+            with the shared platform PSK), `email`, `full_name`, `roles`,
+            `client_roles`, and `auth_method` — one of 'keycloak_token',
+            'user_psk' or 'general_psk'.
+
+        Raises:
+            NX1APIError: On any non-2xx, including a refused authentication.
+        """
+        return self._client.get(
+            "api", "identity", "whoami", headers=self._auth_headers(psk, token)
+        )
 
 
 class DataProductsClient:

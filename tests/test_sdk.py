@@ -142,3 +142,108 @@ class TestDataIngestionClient:
         )
         assert options["sheet_name"] == "Sheet2"
         assert options["header"] == "true"
+
+
+class TestCredentialsClient:
+    """Tests for CredentialsClient auth-header resolution and routing.
+
+    `psk` uses a sentinel default, so three cases must stay distinguishable:
+    not supplied (use the client's configured PSK), explicitly None (send no
+    PSK header), and an explicit value. Collapsing None into "not supplied"
+    would silently make an unauthenticated request authenticated.
+    """
+
+    def _client(self):
+        from nx1_sdk.services.nx1_service import CredentialsClient
+        return CredentialsClient(Mock())
+
+    def test_auth_headers_default_leaves_configured_psk_alone(self):
+        # None, not {} — BaseClient must not be handed an override at all.
+        assert self._client()._auth_headers() is None
+
+    def test_auth_headers_explicit_none_marks_psk_for_removal(self):
+        headers = self._client()._auth_headers(psk=None)
+        assert headers == {"Authorization-PSK": None}
+
+    def test_auth_headers_explicit_psk_overrides(self):
+        headers = self._client()._auth_headers(psk="other-psk")
+        assert headers == {"Authorization-PSK": "other-psk"}
+
+    def test_auth_headers_token_sends_bearer(self):
+        headers = self._client()._auth_headers(token="tok123")
+        assert headers == {"Authorization": "Bearer tok123"}
+
+    def test_auth_headers_token_and_psk_removal_combine(self):
+        headers = self._client()._auth_headers(psk=None, token="tok123")
+        assert headers == {
+            "Authorization-PSK": None,
+            "Authorization": "Bearer tok123",
+        }
+
+    def test_vend_s3_with_bucket_routes_to_bucket_path(self):
+        client = self._client()
+        client.vend_s3("my-bucket")
+        client._client.get.assert_called_once_with(
+            "api", "s3", "credentials", "my-bucket", headers=None
+        )
+
+    def test_vend_s3_without_bucket_routes_to_default_path(self):
+        client = self._client()
+        client.vend_s3()
+        client._client.get.assert_called_once_with(
+            "api", "s3", "credentials", headers=None
+        )
+
+    def test_vend_s3_passes_auth_override_through(self):
+        client = self._client()
+        client.vend_s3("my-bucket", psk=None)
+        _, kwargs = client._client.get.call_args
+        assert kwargs["headers"] == {"Authorization-PSK": None}
+
+    def test_whoami_routes_to_identity_path(self):
+        client = self._client()
+        client.whoami()
+        client._client.get.assert_called_once_with(
+            "api", "identity", "whoami", headers=None
+        )
+
+
+class TestBaseClientHeaders:
+    """Tests for header merging in BaseClient._request.
+
+    A None value removes the header. Every caller depends on this, so it is
+    tested independently of the client that motivated it.
+    """
+
+    def _sent_headers(self, headers=None):
+        """Return the headers BaseClient actually handed to requests."""
+        from nx1_sdk.base import BaseClient
+
+        response = Mock(status_code=200, content=b"{}")
+        response.raise_for_status.return_value = None
+        response.json.return_value = {}
+
+        client = BaseClient(api_key="configured-psk", host="https://example.invalid")
+        with patch("nx1_sdk.base.requests.request", return_value=response) as request:
+            client.get("api", "thing", headers=headers)
+        return request.call_args.kwargs["headers"]
+
+    def test_default_headers_are_sent(self):
+        sent = self._sent_headers()
+        assert sent["Authorization-PSK"] == "configured-psk"
+        assert sent["Content-Type"] == "application/json"
+
+    def test_override_replaces_a_default_header(self):
+        sent = self._sent_headers({"Authorization-PSK": "other-psk"})
+        assert sent["Authorization-PSK"] == "other-psk"
+
+    def test_none_value_removes_the_header(self):
+        sent = self._sent_headers({"Authorization-PSK": None})
+        assert "Authorization-PSK" not in sent
+        # Unrelated defaults must survive the filtering.
+        assert sent["Content-Type"] == "application/json"
+
+    def test_added_header_coexists_with_defaults(self):
+        sent = self._sent_headers({"Authorization": "Bearer tok123"})
+        assert sent["Authorization"] == "Bearer tok123"
+        assert sent["Authorization-PSK"] == "configured-psk"

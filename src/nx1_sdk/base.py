@@ -92,7 +92,14 @@ class BaseClient:
         
         if headers:
             request_headers.update(headers)
-        
+
+        # A None value removes the header, mirroring requests.Session semantics.
+        # Lets a caller suppress a default header (e.g. Authorization-PSK) to
+        # issue a deliberately unauthenticated request.
+        request_headers = {
+            k: v for k, v in request_headers.items() if v is not None
+        }
+
         # Remove Content-Type for file uploads (let requests set multipart boundary)
         if files:
             request_headers.pop("Content-Type", None)
