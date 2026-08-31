@@ -9,6 +9,7 @@ from nx1_sdk.exceptions import NX1ValidationError
 from nx1_sdk.profiles import resolve_config
 from nx1_sdk.services.nx1_service import (
     AppsClient,
+    CredentialsClient,
     CrewsClient,
     DataConsumerClient,
     DataEngineeringClient,
@@ -163,6 +164,7 @@ class NX1Client:
         self.mirroring = DataMirroringClient(self._client)
         self.data_quality = DataQualityClient(self._client)
         self.s3 = S3Client(self._client)
+        self.credentials = CredentialsClient(self._client)
         self.data_products = DataProductsClient(self._client)
         self.data = DataConsumerClient(self._client)
         self.apps = AppsClient(self._client)
