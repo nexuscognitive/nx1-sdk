@@ -14,17 +14,22 @@ A comprehensive Python SDK for the NX1 NLP Agent API.
 
 ## Installation
 
-```bash
-pip install nx1-sdk
-```
+There are two ways to install the SDK.
 
-Or install from source:
+- **From pip**: Install the SDK as a package to use it in your own scripts:
 
-```bash
-git clone https://github.com/nx1/nx1-sdk-python.git
-cd nx1-sdk-python
-pip install -e .
-```
+  ```bash
+  pip install nx1-sdk
+  ```
+
+- **From source**: Use this to test your own changes to the SDK locally:
+
+  ```bash
+  git clone https://github.com/nexuscognitive/nx1-sdk.git
+  cd nx1-sdk
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install -e .
+  ```
 
 ## Quick Start
 

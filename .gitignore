@@ -1,0 +1,9 @@
+# Python virtual environment
+.venv/
+
+# Build output from pip install
+build/
+*.egg-info/
+
+# Python bytecode cache
+__pycache__/

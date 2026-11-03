@@ -41,6 +41,7 @@ dependencies = [
     "urllib3>=1.26.0",
     "pyyaml>=6.0",
     "tabulate>=0.9.0",
+    "websocket-client>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -57,10 +58,10 @@ dev = [
 nx1 = "nx1_sdk.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/nx1/nx1-sdk-python"
+Homepage = "https://github.com/nexuscognitive/nx1-sdk"
 Documentation = "https://docs.nx1cloud.com/sdk"
-Repository = "https://github.com/nx1/nx1-sdk-python"
-Issues = "https://github.com/nx1/nx1-sdk-python/issues"
+Repository = "https://github.com/nexuscognitive/nx1-sdk"
+Issues = "https://github.com/nexuscognitive/nx1-sdk/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
